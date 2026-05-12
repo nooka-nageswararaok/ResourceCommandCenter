@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+release/
+out/
+
+# Electron / builder caches and generated artifacts
+*.blockmap
+*.exe
+*.msi
+*.AppImage
+*.dmg
+
+# Local resource exports and sensitive workbook data
+data/*.xlsx
+data/*.xls
+data/*.xlsm
+data/exports/*
+!data/exports/.gitkeep
+
+# Logs and diagnostics
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment and local settings
+.env
+.env.*
+!.env.example
+
+# Editor / OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
