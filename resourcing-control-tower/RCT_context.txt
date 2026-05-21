@@ -1,0 +1,1571 @@
+Resource Assignation System (RAS) - Application Context
+=======================================================
+
+Last updated: 2026-05-14
+
+
+Purpose
+-------
+Resource Assignation System (RAS), formerly Resourcing Control Tower, is an
+offline Windows desktop application for leadership review of resource
+assignation, billing, assignment end dates, PM ownership, PP financial KPI
+movement, and RFS forecast coverage.
+
+The app is local-only:
+- No backend.
+- No authentication.
+- No database.
+- Excel files are the source of truth.
+
+
+Technology
+----------
+Frontend:
+- React with Vite.
+- MUI DataGrid.
+- Recharts.
+
+Desktop:
+- Electron.
+- Electron main process handles local filesystem access, Excel loading, file
+  selection, and Excel export.
+- Electron preload exposes safe IPC APIs with contextBridge.
+
+Excel:
+- SheetJS/xlsx.
+- Supports `.xlsx`, `.xls`, `.xlsm`, and `.xlsb` where enabled by module.
+
+Packaging:
+- electron-builder.
+- Windows NSIS installer.
+- Installer output:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+Build Commands
+--------------
+- `npm.cmd run build`
+- `npm.cmd run dist`
+
+Recently verified:
+- Both commands completed successfully after the RAS naming and PP period
+  comparison updates.
+
+Packaging notes:
+- `vite.config.js` uses `base: './'` so packaged Electron can load renderer
+  assets from `file://`.
+- Electron-builder currently uses the default Electron icon because no custom
+  icon is configured.
+
+
+Current Modular Layout
+----------------------
+The app now uses a modular shell.
+
+Primary left navigation:
+- RAS
+- PP Report Analysis
+- RFS Tracker
+
+Layout files:
+- `src/layout/MainLayout.jsx`
+  - Main sidebar and module routing outlet.
+- `src/layout/ResourcingLayout.jsx`
+  - Resourcing-only top bar and outlet.
+
+Top bar rules:
+- The Excel top bar is visible only for RAS/Resourcing routes.
+- PP Report Analysis and RFS Tracker use their own local page controls.
+
+
+Routing
+-------
+RAS routes:
+- `/resourcing/home`
+- `/resourcing/leadership-actions`
+- `/resourcing/pm-accountability`
+- `/resourcing/resource-master`
+- `/resourcing/billing-status`
+- `/resourcing/end-date-tracker`
+- `/resourcing/skill-capability`
+- `/resourcing/bench`
+- `/resourcing/alerts`
+- `/resourcing/export`
+
+Other module routes:
+- `/pp-report/overview`
+- `/pp-report/rule-config`
+- `/rfs-tracker/overview`
+
+Route compatibility:
+- Older internal route keys such as `home`, `resources`, `billing`, and
+  `endDates` are mapped to the new Resourcing route keys so existing KPI
+  navigation still works.
+
+
+Electron IPC Bridges
+--------------------
+Resource bridge:
+- `window.resourceBridge.getResourceData()`
+- `window.resourceBridge.selectExcelFile()`
+- `window.resourceBridge.exportWeeklySnapshot(payload)`
+
+PP bridge:
+- `window.ppBridge.getPpData()`
+- `window.ppBridge.selectPpExcelFile()`
+- `window.ppBridge.exportPpAnalysis(payload)`
+
+RFS bridge:
+- `window.rfsBridge.getRfsData()`
+- `window.rfsBridge.selectRfsExcelFile()`
+- `window.rfsBridge.exportRfsSummary(payload)`
+
+Comments bridge:
+- `window.commentsBridge.getCommentsData()`
+- `window.commentsBridge.saveResourceComment(payload)`
+- `window.commentsBridge.savePpComment(payload)`
+
+
+Settings Persistence
+--------------------
+Electron user-data `settings.json` stores selected workbook paths:
+- `selectedWorkbookPath`
+- `selectedPpWorkbookPath`
+- `selectedRfsWorkbookPath`
+
+This allows refresh to reload the same selected workbook after file selection.
+
+Electron user-data `comments.json` stores editable comments:
+- `resource`
+  - RAS PM comments / PMO comments keyed by employee, customer, project, and
+    assignment end date.
+- `pp`
+  - PP PM Remarks keyed by period type, current period, customer, and KPI.
+
+Comment persistence rules:
+- Comments are local to the Windows user profile.
+- Source Excel workbooks are not modified.
+- Reloading the app or refreshing Excel reapplies saved comments where keys
+  match the current workbook rows.
+
+
+Ignored Local Data
+------------------
+`.gitignore` excludes:
+- `node_modules/`
+- `dist/`
+- `release/`
+- local Excel files under `data/*.xlsx`, `data/*.xls`, `data/*.xlsm`
+- `data/exports/*` except `.gitkeep`
+
+
+RAS MODULE
+==========
+
+Note:
+- Internal route/module keys still use `resourcing` for compatibility.
+- Visible application naming is now Resource Assignation System (RAS).
+- The left navigation parent is `RAS`.
+
+Default Input
+-------------
+Default file:
+- `data/Resource_Data.xlsx`
+
+User-selected file:
+- Chosen through the Resourcing top bar.
+- Supports `.xlsx`, `.xls`, and `.xlsm`.
+- Refresh reloads the selected workbook.
+
+Parsing:
+- Electron loads the workbook with SheetJS.
+- First worksheet is parsed.
+- Rows are normalized in `src/services/dataDerivation.js`.
+
+
+RAS Top Bar
+-----------
+Visible only under RAS/Resourcing routes.
+
+Controls:
+- Loaded Excel file name.
+- Loaded timestamp.
+- Employee Name / Employee Code search.
+- Customer quick filter.
+- Project quick filter filtered by selected customer.
+- PM Name multi-select.
+- Location filter.
+- Choose Excel.
+- Refresh Excel.
+
+
+Normalized Fields
+-----------------
+Key normalized fields:
+- `empId`
+- `employeeName`
+- `band`
+- `subBand`
+- `location`
+- `manager`
+- `capability`
+  - Mapped from `HR L4`.
+- `skills`
+  - From `Employee Skill Name`.
+- `fresherClassification`
+  - From `Fresher/FCL /Lateral`.
+- `projectName`
+- `projectCode`
+- `wbsCode`
+- `wbsCodeCategory`
+- `customer`
+- `pmName`
+  - From `PM_Name`.
+- `pmoComments`
+  - From `PMO_COMMENTS`.
+- `billingStatus`
+- `allocationPct`
+- `fte`
+- `assignmentStart`
+- `assignmentEnd`
+
+
+Billing / WBS Rules
+-------------------
+Billing Status:
+- `B` = `Billable`
+- `C` = `Contractual Shadow`
+- `N` = `Non Billable`
+
+Y-Code / C-Code:
+- Derived from the first character of `WBS Code`.
+- Starts with `Y` => `Y-Code`.
+- Starts with `C` => `C-Code`.
+- Otherwise => `Other`.
+
+
+FTE Counting Rule
+-----------------
+All leadership counts use FTE-weighted values, not unique employee count.
+
+Example:
+- If a resource has FTE `0.25`, it contributes `0.25`.
+
+Fallback:
+- If FTE is missing, FTE falls back to `allocationPct / 100`.
+
+Allocation normalization:
+- `1` becomes `100`.
+- `0.25` becomes `25`.
+
+
+Derived Resourcing Logic
+------------------------
+End-date:
+- `daysToEnd` = assignment end date minus current date.
+- `endRiskFlag` = true when `daysToEnd` is between 0 and 30.
+
+Bench:
+- True when Billing Status is `Non Billable`, or WBS type is `Y-Code` or
+  `C-Code`.
+
+Fresher:
+- True when `Fresher/FCL /Lateral` starts with `Fresher`.
+
+Utilization:
+- `(Total FTE - Non Billable FTE) / Total FTE * 100`
+
+
+RAS Pages
+---------
+Home / Executive View:
+- Total FTE.
+- Utilization %.
+- Billable Count.
+- Contractual Shadow.
+- Non Billable Count.
+- Y-Code Count.
+- C-Code Count.
+- Freshers.
+- Ending <=30 Days.
+- Billing Status donut.
+- Customer horizontal bar chart.
+- Band pyramid.
+- Offshore/Onsite summary.
+
+Leadership Action Queue:
+- Prioritized action list.
+- Action types:
+  - End Date Decision.
+  - End Date Follow-up.
+  - Non Billable Conversion.
+  - Y-Code Review.
+  - C-Code Review.
+- `Missing PMO Comment` is intentionally excluded.
+- PM comments are editable.
+- Edited PM comments persist locally in Electron `userData/comments.json`.
+- Edited comments are included in Weekly Snapshot Export.
+
+PM Accountability View:
+- PM-wise FTE, utilization, billing, end-date, and high-priority action metrics.
+
+RAS Master:
+- Full DataGrid with sorting/filtering.
+- Search by employee name/code.
+- Filters:
+  - Customer.
+  - Project dependent on customer.
+  - PM Name multi-select.
+  - Billing Status.
+  - WBS Code Type.
+  - Band.
+  - Location.
+- Row click opens detail modal.
+
+Billing & Status Dashboard:
+- Tabs:
+  - All.
+  - Billable.
+  - Contractual Shadow.
+  - Non Billable.
+  - Y-Code.
+  - C-Code.
+
+Assignment End-Date Tracker:
+- Filters:
+  - Ending <=15 days.
+  - Ending <=30 days.
+  - Ending <=60 days.
+  - Custom range.
+- Color coding:
+  - Red <=15.
+  - Orange 16-30.
+  - Yellow 31-60.
+- PMO_COMMENTS is shown next to Employee Name.
+
+Skill & Capability View:
+- HR L4 filter.
+- Skill heat map from `Employee Skill Name`.
+- Resource table for selected scope.
+
+Bench / Y-Code / C-Code:
+- Tabs:
+  - All.
+  - Bench.
+  - Y-Code.
+  - C-Code.
+  - Non Billable.
+
+Alerts & Actions:
+- Assignment end risk.
+- Non Billable ageing >30 days.
+
+Export & Reports:
+- Weekly Snapshot Export.
+- Exports:
+  - `Executive_KPIs`
+  - `Leadership_Actions`
+  - `PM_Accountability`
+  - `Resource_Detail`
+- Includes edited PM comments from current session.
+
+
+PP REPORT ANALYSIS MODULE
+=========================
+
+Default Input
+-------------
+Default workbook:
+- `C:\Users\nooka.nageswararaok\Downloads\Final_MEGA Financial Trend FY'26 @FX27 Rates_IND.xlsb`
+
+Reference workbook used for target layout:
+- `C:\Users\nooka.nageswararaok\OneDrive - HCL TECHNOLOGIES LIMITED\Documents\Nagesh\Engagements\PP Report\ERS MEGA - GM Trend @FX27 rate YTD Apr'26_MFG.xlsb`
+
+Reference worksheet:
+- `KPI Comparison`
+
+Instruction source:
+- `C:\Users\nooka.nageswararaok\Downloads\CONSOLIDATED PROMPT FOR KPI COMP.md`
+
+Parsing:
+- Electron loads the `Base` sheet using SheetJS dense mode.
+- `.xlsb`, `.xlsx`, `.xls`, and `.xlsm` are supported through Choose PP Excel.
+- Dense mode was required because full `.xlsb` parsing is large.
+
+
+PP Normalized Fields
+--------------------
+Rows are normalized in Electron main process before sending to React.
+
+Key fields:
+- `l4Mapping`
+- `l3Mapping`
+- `customerCode`
+- `customerName`
+- `customerGrouping`
+- `componentGroup`
+- `revisedComponentGroup`
+- `projectCode`
+- `projectName`
+- `projectType`
+- `majorProjectCategory`
+- `costElement`
+- `mode`
+- `month`
+- `quarter`
+- `fiscal`
+- `offshoreOnsite`
+- `l2Pm`
+- `l3Pm`
+- `l4Pm`
+- `totalRevenue`
+- `revisedDrc`
+- `revisedGm`
+- `totalProjectExpenses`
+- `totalGfte`
+- `totalAfte`
+- `totalBfte`
+
+
+PP Filters
+----------
+Current filters:
+- L4 Mapping Contains
+  - Multi-select.
+  - Defaults to all L4 mappings containing `DIGITAL ENGG1`.
+  - Handles both INDUSTRIAL and MFG naming variants.
+- Customer Groupings
+  - Multi-select.
+- Customer.
+- Project.
+- Period Type
+  - Month.
+  - Qtr.
+  - Fiscal.
+- Current Period
+  - Label changes based on selected Period Type:
+    - Current Month.
+    - Current Qtr.
+    - Current Fiscal.
+- Comparison Periods
+  - Multi-select.
+  - Defaults to the previous three available periods for the selected Period
+    Type where possible.
+- Fiscal Filter
+  - Disabled when Period Type is Fiscal to avoid duplicate filtering.
+
+Period comparison behavior:
+- Month mode compares selected month against selected comparison months.
+- Qtr mode aggregates rows by `quarter` and compares selected Qtr against
+  selected comparison Qtrs.
+- Fiscal mode aggregates rows by `fiscal` and compares selected Fiscal against
+  selected comparison Fiscal values.
+
+
+PP KPI Order
+------------
+The detailed KPI comparison uses this order:
+1. Total Revenue
+2. Revised DRC
+3. Revised GM
+4. GM%
+5. Total Project Expenses
+6. Realization
+7. Total ARC
+8. Total GFTE
+9. Total AFTE
+10. Total BFTE
+11. Unbilled
+12. GFTE Utili %
+13. AFTE Utili %
+
+
+PP KPI Formulas
+---------------
+Direct:
+- Total Revenue
+- Revised DRC
+- Revised GM
+- Total Project Expenses
+- Total GFTE
+- Total AFTE
+- Total BFTE
+
+Calculated:
+- Realization = Total Revenue / Total AFTE
+- Total ARC = Revised DRC / Total GFTE
+- GM% = Revised GM / Total Revenue
+- GFTE Utili % = Total BFTE / Total GFTE
+- AFTE Utili % = Total BFTE / Total AFTE
+- Unbilled = Total AFTE - Total BFTE
+
+Division by zero returns 0.
+
+
+PP Output Layout
+----------------
+The PP screen is now report-focused and does not show KPI cards or charts.
+
+Displayed sections:
+- Filter panel.
+- Detailed KPI Comparison by Customer.
+- Grand Total Summary.
+
+Removed sections:
+- Customer-Wise Revenue Comparison.
+- Revenue Summary by Customer.
+- KPI Action Flags card.
+- Grand Total Current vs 3-Month Average card.
+- KPI cards.
+- Charts.
+
+
+Detailed KPI Comparison by Customer
+-----------------------------------
+Behavior:
+- Customer results are grouped under collapsible cards.
+- Each card title is the customer/customer group name.
+- First customer card is expanded by default.
+- Customer column is not shown inside the KPI grid.
+- Grid rows are compact.
+
+Columns:
+- KPI.
+- Each selected comparison period.
+- 3-Month Avg in Month mode.
+- Comparison Avg in Qtr/Fiscal modes.
+- Current period.
+- Change.
+- RFS Value.
+- Trend.
+- Action Flag.
+- PM Remarks.
+
+PM Remarks:
+- Editable in the grid.
+- Persist locally in Electron `userData/comments.json`.
+- Reloading PP Analysis reapplies saved remarks when period type, current
+  period, customer, and KPI match.
+- Not written back to source Excel.
+
+Action Flag:
+- Derived through a configurable PP rule engine.
+- Rules are evaluated in the UI against the current filtered PP scope and, for
+  Total Revenue, the matching RFS customer-group value where available.
+- Action flag colors are configurable.
+
+Current action rule behavior:
+- Total Revenue:
+  - Compare current period value against corresponding RFS value.
+  - If PP revenue is lower: `Missing Revenue or UBR or RT based on RFS`.
+  - Double-click opens Total Revenue details by `Cost Element_6`.
+- Revised DRC:
+  - Indicative DRC = previous period Total ARC * current period Total GFTE.
+  - Above indicative DRC flags possible added high-cost resources.
+  - Below indicative DRC flags possible released high-cost resources.
+- Revised GM and GM%:
+  - Positive movement flags improved GM.
+  - Negative movement flags decreased GM.
+- Total Project Expenses:
+  - Double-click opens expense details by `Cost Element_6`.
+  - Deviation above configured threshold, default 10%, is highlighted.
+- Total GFTE, Total AFTE, Total BFTE:
+  - Positive movement flags ramp up.
+  - Negative movement flags ramp down.
+- Realization:
+  - Default improvement threshold is current value more than 10% above
+    comparison average.
+  - Decline flags missed revenue or unbilled resources.
+- Total ARC:
+  - Positive movement flags increased cost.
+  - Negative movement flags decreased cost.
+- GFTE Utili % and AFTE Utili %:
+  - Default red below 80.
+  - Default amber from 80 to below 90.
+  - Default green at 90 and above.
+- Unbilled:
+  - Default threshold is >=10% of Total GFTE.
+
+
+PP Color Coding
+---------------
+Applies to period/current/average/change numeric cells:
+- Negative numbers are red by default.
+- Negative number color is configurable in PP Rule Configuration.
+
+GM% thresholds:
+- GM% <=25: red by default.
+- GM% 26-35: amber by default.
+- GM% >=36: green by default.
+- Thresholds are configurable.
+
+Note:
+- Negative number red takes priority over threshold coloring.
+
+
+PP Rule Configuration
+---------------------
+Route:
+- `/pp-report/rule-config`
+
+Purpose:
+- Allows business users to configure PP KPI action rules without code changes.
+
+Persistence:
+- Stored locally in browser storage inside the Electron renderer.
+- No backend.
+- No Excel source modification.
+
+Configurable options:
+- Enable/disable each KPI rule.
+- Action flag messages.
+- Thresholds:
+  - GM%.
+  - Utilization %.
+  - Unbilled % of Total GFTE.
+  - Expense deviation %.
+  - Realization improvement %.
+- Action flag and numeric cell colors:
+  - Red.
+  - Amber.
+  - Green.
+  - None.
+- Revenue and expense drill-down toggles.
+
+Configured KPI sections:
+- Total Revenue.
+- Revised DRC.
+- Revised GM.
+- GM%.
+- Total Project Expenses.
+- Total GFTE.
+- Total AFTE.
+- Total BFTE.
+- Realization.
+- Total ARC.
+- GFTE Utili %.
+- AFTE Utili %.
+- Unbilled.
+
+
+PP Export
+---------
+Control:
+- `Export PP` button on PP Report Analysis overview.
+
+Output:
+- Saves `.xlsx` through an Electron save dialog.
+
+Sheets:
+- `Detailed KPI Comparison`
+  - Includes PM Remarks.
+  - Includes Action Flag.
+  - Includes RFS Value.
+  - Uses selected comparison period columns.
+- `Grand Total Summary`.
+- `Filters and Source`.
+
+PM Remarks:
+- Editable in the grid.
+- Persist locally in Electron `userData/comments.json`.
+- Preserved in the exported PP workbook.
+- Not written back to source Excel.
+
+
+Grand Total Summary
+-------------------
+Behavior:
+- Summarizes the current filtered PP scope.
+- The Customer value is no longer hardcoded to `ALL CUSTOMERS`.
+- It displays:
+  - Selected customer name when the Customer filter is used.
+  - Selected customer groups when Customer Groupings are selected.
+  - `Selected Customers` otherwise.
+
+
+RFS TRACKER MODULE
+==================
+
+Default Input
+-------------
+Default workbook:
+- `C:\Users\nooka.nageswararaok\OneDrive - HCL TECHNOLOGIES LIMITED\Documents\Nagesh\Engagements\PP Report\RFS Tracker - FY'27 (10).xlsb`
+
+Source worksheet:
+- Depends on selected RFS Quarter:
+  - AMJ: `base data-AMJ26`
+  - JAS: `base data-JAS26`
+  - OND: `base data-OND26`
+  - JFM: `base data-JFM27`
+
+Target output worksheet:
+- Depends on selected RFS Quarter:
+  - AMJ: `RFS Summary AMJ26`
+  - JAS: `RFS Summary JAS26`
+  - OND: `RFS Summary OND26`
+  - JFM: `RFS Summary JFM27`
+
+Instruction worksheet:
+- `RFS Summary Prompt`
+
+The prompt worksheet is used for implementation guidance but is no longer shown
+in the UI.
+
+
+RFS Calculation Rules
+---------------------
+Filter:
+- Project Status = `Active`
+
+Grouping:
+- Group by `Customer Group`.
+
+Monthly RFS:
+- Selected quarter month RFS = Month Firm + Month MP
+- AMJ uses Apr/May/Jun.
+- JAS uses Jul/Aug/Sep.
+- OND uses Oct/Nov/Dec.
+- JFM uses Jan/Feb/Mar.
+
+Total:
+- Total RFS = selected quarter month RFS totals.
+- Grand Total sums all visible filtered customer groups.
+
+
+RFS Parsed Fields
+-----------------
+Key fields:
+- `l4Name`
+- `projectStatus`
+- `customerName`
+- `customerGroup`
+- `projectCode`
+- `projectName`
+- `pm`
+- `eeEnNn`
+  - From `EE/EN/NN`.
+- `onOff`
+  - From `On/Off ` or `On/Off`.
+- Dynamic selected-quarter month fields:
+  - `{monthKey}Firm`
+  - `{monthKey}Mp`
+  - Examples:
+    - AMJ: `aprFirm`, `aprMp`, `mayFirm`, `mayMp`, `junFirm`, `junMp`.
+    - JAS: `julFirm`, `julMp`, `augFirm`, `augMp`, `sepFirm`, `sepMp`.
+    - OND: `octFirm`, `octMp`, `novFirm`, `novMp`, `decFirm`, `decMp`.
+    - JFM: `janFirm`, `janMp`, `febFirm`, `febMp`, `marFirm`, `marMp`.
+
+
+RFS UI
+------
+Controls:
+- RFS Quarter selector:
+  - AMJ.
+  - JAS.
+  - OND.
+  - JFM.
+- Choose RFS Excel.
+- Refresh RFS.
+- Export Summary.
+
+Filters:
+- Customer Group
+  - Multi-select.
+- Project Manager.
+- EE/EN/NN.
+- On/Off.
+
+Filters affect:
+- KPI cards.
+- Selected-quarter RFS Summary table.
+- Active Source Detail table.
+- Export Summary output.
+
+KPI cards:
+- Customer Groups.
+- Active Projects.
+- Selected quarter month RFS cards.
+- Total RFS.
+
+Tables:
+- Selected-quarter RFS Summary table.
+  - Customer Group.
+  - Selected quarter month RFS columns.
+  - Total RFS.
+  - Grand Total row.
+- Active Source Detail.
+  - Includes EE/EN/NN.
+  - Includes On/Off.
+
+Removed:
+- `RFS Summary Prompt` card.
+
+Export:
+- `Export Summary` saves the current filtered RFS summary as `.xlsx`.
+
+
+RFS and PP Relationship
+-----------------------
+RFS Tracker is intended to support PP Analysis action flags.
+
+Current status:
+- RFS summary is calculated and filtered independently.
+- PP Analysis now reads RFS summary values for Total Revenue action flag
+  comparison when customer group names match.
+- PP month comparison uses the matching RFS month field from the loaded
+  quarter summaries.
+- PP quarter comparison uses the matching RFS quarter total.
+- PP fiscal comparison sums matching customer-group RFS values across AMJ,
+  JAS, OND, and JFM.
+
+Potential future refinement:
+- Add deeper PP/RFS combined action models, such as:
+  - Low GM% with strong RFS pipeline.
+  - Revenue decline with weak RFS.
+  - High unbilled with low future RFS coverage.
+
+
+PROJECT EXPENSES MODULE
+=======================
+
+Current status:
+- Removed from the active left navigation menu.
+- Placeholder source file remains in the codebase for possible future reuse.
+
+Page:
+- `src/pages/expenses/ExpenseOverview.jsx`
+
+Placeholder KPIs:
+- Budget.
+- Actual.
+- Variance.
+
+Message:
+- Project expense analytics will be enabled using Excel uploads.
+
+
+Known Limitations
+-----------------
+- Source Excel files are not modified.
+- Editable RAS comments and PP remarks persist locally, but they are not yet
+  synced across users or written back to source workbooks.
+- PP and RFS are partially connected for Total Revenue RFS comparison but are
+  not yet merged into a single combined action model.
+- RFS supports AMJ, JAS, OND, and JFM source/output sheet selection.
+- PP supports Month, Qtr, and Fiscal period comparison using workbook fields.
+- No backend storage.
+- No authentication or role-based access.
+- No Power BI embedding yet.
+- No desktop notification alerts yet.
+
+
+Recommended Next Enhancements
+-----------------------------
+1. Add comment management controls.
+   - Add clear/export/import options for locally persisted comments.
+   - Show last-updated metadata for persisted comments.
+
+2. Expand RFS-to-PP Action Flags.
+   - Add RFS coverage indicators beyond Total Revenue.
+   - Add combined PP/RFS action sheet.
+
+3. Extend RFS-to-PP quarter awareness.
+   - Use selected RFS quarter when comparing PP month/quarter values.
+   - Add stronger validation when a selected PP period has no matching RFS
+     quarter loaded.
+
+4. Add PP/RFS export package.
+   - Combine PP detailed KPI comparison with PM remarks.
+   - Export RFS summary.
+   - Include a combined action sheet.
+
+5. Add app icon for packaged installer.
+
+
+Version History
+===============
+
+v1.0.0 - Initial Resourcing MVP
+-------------------------------
+- Offline React/Electron app.
+- Resource workbook loading from Excel.
+- Home dashboard.
+- Resource Master.
+- Billing dashboard.
+- Assignment end-date tracker.
+- Skill and capability view.
+- Bench/Y-Code/C-Code view.
+- Alerts and export reports.
+
+
+v1.1.0 - Excel Input and Resourcing Definitions
+-----------------------------------------------
+- Switched resource input from CSV to Excel.
+- Added file picker for resource Excel.
+- Persisted selected resource workbook path.
+- Added billing status mappings:
+  - B = Billable.
+  - C = Contractual Shadow.
+  - N = Non Billable.
+- Added WBS-based Y-Code/C-Code derivation.
+- Added Freshers KPI.
+- Added HR L4 and skill heat map changes.
+- Added PM_Name filters and PMO comments.
+
+
+v1.2.0 - Leadership Actions and Weekly Export
+---------------------------------------------
+- Added Leadership Action Queue.
+- Added PM Accountability View.
+- Added Weekly Snapshot Export.
+- Added FTE-weighted metrics.
+- Excluded Missing PMO Comment action type.
+- Added editable PM comments in Leadership Action Queue.
+
+
+v1.3.0 - Modular Refactor
+-------------------------
+- Introduced module-level navigation:
+  - Resourcing.
+  - PP Report Analysis.
+  - RFS Tracker.
+  - Project Expenses.
+- Moved Resourcing screens under `/resourcing`.
+- Added `MainLayout`.
+- Added `ResourcingLayout`.
+- Resourcing top bar is now visible only under Resourcing routes.
+- Added placeholder pages for PP, RFS, and Expenses.
+
+Note:
+- Project Expenses was later removed from the active left navigation in v2.0.0.
+
+
+v1.4.0 - PP Analysis Implementation
+-----------------------------------
+- Added PP-specific Electron bridge.
+- Added `.xlsb` PP workbook loading.
+- Parsed PP `Base` sheet.
+- Implemented KPI comparison formulas.
+- Added current month vs comparison month calculations.
+- Added reference-layout behavior from `KPI Comparison` worksheet.
+- Added multi-select filters.
+- Added default `DIGITAL ENGG1` L4 slice.
+- Reworked PP UI to report-focused view.
+- Added collapsible customer cards.
+- Added Action Flag and editable PM Remarks.
+- Added numeric color coding and GM% threshold colors.
+
+
+v1.5.0 - RFS Tracker Implementation
+-----------------------------------
+- Added RFS-specific Electron bridge.
+- Added `.xlsb` RFS workbook loading.
+- Parsed `base data-AMJ26`.
+- Implemented `RFS Summary AMJ26` calculation:
+  - Active projects only.
+  - Firm + MP by month.
+  - Customer Group summary.
+  - Grand Total.
+- Added RFS filters:
+  - Customer Group multi-select.
+  - Project Manager.
+- Added RFS export summary.
+- Removed RFS prompt card from UI.
+- Prepared RFS output for future PP Action Flag comparison.
+
+
+v1.6.0 - PP Action Rule Engine and Export
+-----------------------------------------
+- Added configurable PP action rule behavior in the overview grid.
+- Replaced Detailed KPI Comparison `Change %` column with `RFS Value`.
+- Connected PP Total Revenue action flag to matching RFS customer-group value.
+- Added Total Revenue drill-down by `Cost Element_6`.
+- Added Total Project Expenses drill-down by `Cost Element_6`.
+- Added configurable expense deviation threshold, default 10%.
+- Added utilization color thresholds for GFTE Utili % and AFTE Utili %.
+- Added `Export PP` Excel export.
+- PP export preserves session PM Remarks.
+- Added Electron IPC bridge:
+  - `window.ppBridge.exportPpAnalysis(payload)`.
+
+
+v1.7.0 - PP Rule Configuration Screen
+-------------------------------------
+- Added `PP Report Analysis > Rule Configuration`.
+- Added route `/pp-report/rule-config`.
+- Added configurable rules for all 13 PP KPIs.
+- Added configurable action messages, thresholds, and color markings.
+- Added local renderer persistence for PP rule configuration.
+- Added reset-to-default and save behavior.
+
+
+v1.8.0 - PP Period Comparison Modes
+-----------------------------------
+- Added Period Type selector to PP Report Analysis:
+  - Month.
+  - Qtr.
+  - Fiscal.
+- Added dynamic Current Period selector.
+- Added dynamic Comparison Periods multi-select.
+- Updated detailed KPI and grand-total calculations to aggregate by selected
+  period type.
+- Updated PP export metadata to include selected period type/current period and
+  comparison periods.
+
+
+v1.9.0 - RAS Naming Update
+--------------------------
+- Renamed visible application title from `Resourcing Control Tower` to
+  `Resource Assignation System (RAS)`.
+- Renamed left navigation parent from `Resourcing` to `RAS`.
+- Renamed `Resource Master Dashboard` to `RAS Master`.
+- Renamed Resource Master page heading to `RAS Master`.
+- Updated packaged product name to `Resource Assignation System (RAS)`.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.0.0 - RFS Quarter Selector and Navigation Cleanup
+----------------------------------------------------
+- Added RFS Quarter selector:
+  - AMJ.
+  - JAS.
+  - OND.
+  - JFM.
+- RFS parser now automatically selects source worksheet and month columns:
+  - AMJ -> `base data-AMJ26`, Apr/May/Jun.
+  - JAS -> `base data-JAS26`, Jul/Aug/Sep.
+  - OND -> `base data-OND26`, Oct/Nov/Dec.
+  - JFM -> `base data-JFM27`, Jan/Feb/Mar.
+- RFS summary output name now follows selected quarter.
+- RFS KPI cards, summary grid, detail grid, and export columns are dynamic by
+  selected quarter.
+- Project Expenses was removed from the left navigation menu.
+
+
+v2.1.0 - RFS Filters and Fiscal RFS Fix
+---------------------------------------
+- Added RFS filters:
+  - EE/EN/NN.
+  - On/Off.
+- Added EE/EN/NN and On/Off columns to Active Source Detail.
+- PP Analysis now loads all four RFS quarter summaries for action flag context.
+- PP Fiscal comparison now sums RFS values across AMJ, JAS, OND, and JFM
+  instead of reusing a single quarter total.
+
+
+v2.2.0 - Local Comment Persistence
+----------------------------------
+- Added Electron `comments.json` under `userData`.
+- Added comments IPC bridge:
+  - `comments:getData`.
+  - `comments:saveResource`.
+  - `comments:savePp`.
+- RAS Leadership Action Queue PM comments now persist locally.
+- PP Detailed KPI Comparison PM Remarks now persist locally.
+- Saved comments are reapplied on app reload and workbook refresh when their
+  generated keys match current rows.
+- Source Excel files remain unchanged.
+
+
+v2.3.0 - Windows Application Icon Packaging
+-------------------------------------------
+- Added custom Windows icon assets under `build/`.
+- Added runtime BrowserWindow icon.
+- Added Electron App User Model ID for Windows taskbar grouping.
+- Added local `afterPack` executable icon stamping using cached `rcedit-x64.exe`.
+- Installer, unpacked executable, and installed shortcuts now use the same
+  corporate application icon.
+
+
+v2.4.0 - Resource Fulfilment Module
+-----------------------------------
+- Added new left navigation module: `Resource Fulfilment`.
+- Added routes:
+  - `/resource-fulfilment/active-demands`.
+  - `/resource-fulfilment/candidate-details`.
+- Added fulfilment workbook upload and refresh via Electron IPC:
+  - `fulfilment:getData`.
+  - `fulfilment:selectExcel`.
+- Selected fulfilment workbook is persisted in Electron `userData/settings.json`.
+- Active Demands Dashboard reads the `Active SR` worksheet.
+- Active Demands Dashboard columns:
+  - Status.
+  - Offshore/Onsite.
+  - Customer.
+  - Legacy Job Req Id.
+  - Job Requisition ID/Demand ID.
+  - Role.
+  - Total Positions.
+  - Remaining Positions.
+  - Aging in Days.
+  - # Profiles Received.
+  - # TP-1 Selected.
+  - # TP-2/Client Selected.
+  - # TP-3/Client Selected.
+  - # Onboarded.
+  - # Renege.
+  - PM.
+  - CU Mapping.
+- Active Demands Dashboard includes multi-select filters for:
+  - Customer.
+  - Status.
+  - PM.
+  - Offshore/Onsite.
+  - CU Mapping.
+- Active Demands summary KPIs are calculated from visible filtered rows:
+  - Total Demands.
+  - Total Positions.
+  - Remaining.
+  - Profiles.
+  - Onboarded.
+- Candidate Details Dashboard is added as a workbook-aware shell pending source
+  worksheet and candidate column rules.
+
+
+v2.5.0 - Fulfilment Candidate Details Dashboard
+-----------------------------------------------
+- Candidate Details Dashboard now reads `Candidate Tracker`.
+- Added Legacy Job Req Id selector from active demands.
+- Added parent-child navigation:
+  - Double-click Active Demands row.
+  - Use Candidates > View action.
+  - Back button from Candidate Details to Active Demands.
+- Added Candidate Details KPIs:
+  - Total Candidates.
+  - Screen Select.
+  - TP-1 Selected.
+  - TP-2 Selected.
+  - TP-3 Selected.
+  - Offers.
+- Added candidate status color coding:
+  - Selected.
+  - Rejected.
+  - Pending.
+  - Scheduled.
+
+
+v2.6.0 - Fulfilment Leadership Review
+-------------------------------------
+- Added shared fulfilment rule engine:
+  - `src/services/fulfilmentAnalysis.js`.
+- Added expanded Active Demands KPIs:
+  - Fulfilment %.
+  - Aging >30.
+  - Aging >60.
+  - Zero Profiles.
+  - Stale Demands.
+- Added Demand Funnel view:
+  - Remaining.
+  - Profiles.
+  - Screen Select placeholder.
+  - TP-1 Selected.
+  - TP-2 Selected.
+  - TP-3 Selected.
+  - Offers placeholder.
+  - Onboarded.
+- Expanded Candidate Details KPIs:
+  - Screen Select %.
+  - TP-1 Select %.
+  - TP-2 Select %.
+  - TP-3 Select %.
+  - Offer Conversion %.
+  - Pending Interviews.
+  - Rejected.
+  - Average Profile-to-Offer days.
+- Added Resource Fulfilment route:
+  - `/resource-fulfilment/leadership-review`.
+- Added Fulfilment Leadership Review page with:
+  - Fulfilment Action Queue.
+  - Customer Risk Board.
+  - PM Accountability Board.
+  - Customer Aging Heatmap.
+  - PM Aging Heatmap.
+  - Role Hotspot View.
+  - Weekly Snapshot.
+- Fulfilment Action Queue rules include:
+  - Critical Aging.
+  - No Profiles Received.
+  - Low Pipeline.
+  - Stale Demand.
+  - Onsite Aging Risk.
+  - Screening Pending.
+  - Selected but No Offer.
+  - High Rejection Pattern.
+- Added fulfilment snapshot export:
+  - `fulfilment:exportSnapshot`.
+  - Multi-sheet Excel export with Weekly Snapshot, Action Queue, Customer Risk,
+    PM Risk, Role Hotspots, Active Demands, and Candidate Details.
+
+
+v2.7.0 - Fulfilment Filters and Base Dashboard
+----------------------------------------------
+- Active Demands parser now captures:
+  - Location.
+  - Band.
+- Active Demands Dashboard now includes multi-select filters for:
+  - Location.
+  - Band.
+- Active Demands grid now includes Location and Band columns.
+- Fulfilment workbook parser now reads base sheet:
+  - `Fulfillment Details 2025&2026`.
+- Added Resource Fulfilment route:
+  - `/resource-fulfilment/base-dashboard`.
+- Added Fulfilment Base Dashboard with filters:
+  - Month.
+  - Customer.
+  - Location.
+  - Hiring Mode.
+  - DM.
+  - PSA.
+- Fulfilment Base Dashboard includes grouped views:
+  - Customer Wise.
+  - Location Wise.
+  - Hiring Mode Wise.
+  - DM Wise.
+  - PSA Wise.
+  - Month Wise.
+- Fulfilment Base Dashboard includes detail grid from the base sheet with:
+  - Month.
+  - Customer.
+  - Location.
+  - Hiring Mode.
+  - DM.
+  - PSA.
+  - Count.
+  - Candidate Name.
+  - SAP ID.
+  - SR#.
+  - Joining/FS Date.
+  - Comments.
+
+
+v2.7.1 - Fulfilment Base Dashboard Layout Refinement
+----------------------------------------------------
+- Renamed `External Hiring` KPI to `Lateral Hiring`.
+- Reordered grouped dashboard cards:
+  - Customer Wise Heatmap.
+  - DM Wise Heatmap.
+  - Hiring Mode Wise.
+  - Location Wise.
+  - PSA Wise.
+  - Month Wise.
+- Replaced Customer Wise and DM Wise table cards with compact heatmap block
+  cards, sized by fulfilment count.
+
+
+v2.7.2 - Fulfilment Dashboard Compact Layout
+--------------------------------------------
+- Active Demands KPI cards are compacted to fit more cards in one row.
+- Active Demands filters are compacted, including smaller PM and
+  Offshore/Onsite filter widths.
+- Active Demands funnel cards are compacted.
+- Candidate Details KPI cards are compacted.
+- Fulfilment Base Dashboard removes Candidate Rows KPI.
+- Fulfilment Base grouped table cards remove the Rows column.
+- Fulfilment Base replaces PSA Wise and Month Wise table cards with compact
+  heatmap block cards.
+- Fulfilment Leadership Review replaces Weekly Snapshot table with compact
+  heatmap block cards.
+
+
+v2.7.3 - Candidate Customer and Final Select Rule Updates
+--------------------------------------------------------
+- Candidate Details Dashboard now includes Customer from `Candidate Tracker`.
+- Candidate Details grid now displays Customer next to Profile Received Date.
+- Fulfilment Leadership Review action logic updated for interview flow:
+  - Screen Select.
+  - TP1 interview.
+  - TP2 interview.
+  - TP3 interview only for selected customer processes.
+- Final select is now treated as:
+  - TP2 selected, or
+  - TP3 selected where customer process uses TP3.
+- Replaced generic `Selected but No Offer` action with
+  `Final Select but No Offer`.
+- Added `Awaiting Customer Interview Decision` action for candidates who clear
+  TP1 but do not yet have TP2/TP3 final selection.
+- Current Bottleneck and Recommended Action wording now reflects TP2 as the
+  normal final interview decision point, with TP3 called out as customer-specific.
+
+
+v2.7.4 - Latest Build Status
+----------------------------
+- Latest Windows installer build completed successfully after v2.7.2 and v2.7.3
+  changes.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.7.5 - Active Demands Cascading Filters and Heatmap
+-----------------------------------------------------
+- Active Demands parser now derives Demand Month from:
+  - `Req Date`, with
+  - `TRF Requested Date` fallback.
+- Active Demands Dashboard now treats Status as the primary filter.
+- Customer filter options now cascade from selected Status values.
+- Added Month filter to Active Demands Dashboard.
+- Replaced ActiveDemandsTable grid with compact heatmap-style demand cards.
+- Active Demand heatmap cards exclude filter-only fields:
+  - Status.
+  - Customer.
+  - Month.
+  - PM.
+  - Offshore/Onsite.
+  - Location.
+  - Band.
+  - CU Mapping.
+- Active Demand heatmap cards retain operational fields:
+  - Legacy Job Req Id.
+  - Role.
+  - Total Positions.
+  - Remaining.
+  - Aging.
+  - Profiles.
+  - TP1.
+  - TP2.
+  - TP3.
+  - Onboarded.
+  - Renege.
+  - Candidate Details action.
+
+
+v2.7.6 - Candidate Stage Heatmap and Billing Type
+-------------------------------------------------
+- Candidate Details Dashboard now shows Candidate Stage Heatmap above the
+  Candidate Pipeline grid.
+- Stage heatmap blocks summarize:
+  - Profile Received.
+  - Screening.
+  - TP1 Interview.
+  - TP2 Interview.
+  - TP3 Interview.
+  - Offer.
+  - Selected.
+  - Rejected.
+  - Pending.
+  - Scheduled.
+  - No Update.
+  - Billing Loss.
+  - Pro Active.
+- Candidate Details grid now includes:
+  - Billing Type.
+  - Current Stage.
+  - Stage Status.
+- Billing Type is joined from Active SR `Billing Loss`:
+  - Yes -> `Billing Loss`.
+  - No/blank -> `Pro Active`.
+- Stage Status is derived from Candidate Tracker stage columns:
+  - Screen Select/Reject.
+  - TP1 Status.
+  - TP2 Status / Client Interview-1.
+  - TP3 Status / Customer Interview-2.
+  - Offer Status.
+- SharePoint `JCI_JCH_Portfolio.xlsx` was referenced for stage classification,
+  but it requires authenticated SharePoint access and was not directly readable
+  from this environment.
+
+
+v2.7.7 - Candidate Stage Classification Workbook
+------------------------------------------------
+- Candidate Details Dashboard now reads stage classification from local workbook:
+  `C:\Users\nooka.nageswararaok\Downloads\Stage_Classification.xlsx`.
+- Source worksheet:
+  - `Resourcing`.
+- Electron fulfilment data now includes parsed stage groups and stage details:
+  - Profile Sourcing.
+  - TP1.
+  - TP2.
+  - Customer Feedback.
+  - Onboarding.
+- Candidate Stage Heatmap now uses the stage groups from the classification
+  workbook instead of only fallback screen/interview labels.
+- Candidate Pipeline grid now includes:
+  - Stage code.
+  - Stage detail from the classification workbook.
+- Candidate status flow remains based on Candidate Tracker fields:
+  - Screen status maps to Profile Sourcing.
+  - TP1 status maps to TP1.
+  - TP2 status maps to TP2.
+  - TP3 status maps to Customer Feedback.
+  - Offer status maps to Onboarding.
+- Billing Loss vs Pro Active classification continues to come from Active SR
+  `Billing Loss`.
+
+
+v2.7.8 - Fulfilment Billing Type and Stage Card Layout
+------------------------------------------------------
+- Active Demands Dashboard now shows Billing Loss / Pro Active directly on
+  each Active Demand heatmap card.
+- Billing type source remains Active SR `Billing Loss`:
+  - Yes -> Billing Loss.
+  - No/blank -> Pro Active.
+- Candidate Details Dashboard no longer mixes Billing Loss / Pro Active into
+  the stage heatmap.
+- Candidate Stage Heatmap is now shown as stage cards:
+  - Each card heading shows the stage name and total candidate count.
+  - Status blocks are nested under each stage:
+    - Selected.
+    - Rejected.
+    - Pending.
+    - Scheduled.
+    - No Update.
+- Candidate Pipeline keeps stage code, stage detail, current stage, and stage
+  status from the stage-classification-driven flow.
+
+
+v2.7.9 - Demand Identifier Format and Stage Code Blocks
+-------------------------------------------------------
+- Active Demands heatmap cards now show demand identifiers in the format:
+  `Legacy Job Req Id (Job Requisition ID/Demand ID)`.
+- Candidate Stage Heatmap stage cards now show detailed stage-code blocks
+  under each parent stage using `Stage_Classification.xlsx`.
+- Stage-code block ranges are sourced from the `Resourcing` sheet:
+  - Profile Sourcing: 1.01 to 1.17.
+  - TP1: 2.01 to 2.16.
+  - TP2: 3.01 to 3.15.
+  - Customer Feedback: 4.01 to 4.10.
+  - Onboarding: 5.1 to 5.7.
+- Candidate status-to-stage-code matching now uses the candidate stage status
+  text and the classification descriptions:
+  - Screen status maps to Profile Sourcing stage codes.
+  - TP1 status maps to TP1 stage codes.
+  - TP2 and TP3 statuses map to TP2 stage codes.
+  - Offer status maps to Onboarding stage codes.
+- Each stage-code mini-block shows the count for candidates currently matching
+  that stage code; the full stage description is available as hover text.
+
+
+v2.7.10 - Stage Heatmap Parent Card Code Guard
+----------------------------------------------
+- Candidate Stage Heatmap now enforces stage-code prefixes per parent card:
+  - Profile Sourcing only shows `1.*`.
+  - TP1 only shows `2.*`.
+  - TP2 only shows `3.*`.
+  - Customer Feedback only shows `4.*`.
+  - Onboarding only shows `5.*`.
+- This prevents the Profile Sourcing card from displaying TP1, TP2, Customer
+  Feedback, or Onboarding stage codes.
+
+
+v2.7.11 - Stage Code De-duplication
+-----------------------------------
+- Candidate Stage Heatmap now de-duplicates stage-code mini-blocks within each
+  parent card.
+- Profile Sourcing now renders each stage code only once:
+  - `1.01` through `1.17`.
+- Stage-code blocks are sorted numerically within each parent stage card.
+
+
+v2.8.0 - Fulfilment Stage Delay Dashboard
+-----------------------------------------
+- Added new Resource Fulfilment module screen:
+  - Stage Delay Dashboard.
+- Stage Delay Dashboard uses Candidate Tracker, Active SR, and
+  Stage_Classification.xlsx to derive:
+  - Current candidate stage.
+  - Stage code.
+  - Stage SPOC.
+  - Stage status.
+  - Days in current stage.
+  - SLA days.
+  - Severity: On Track / Watch / Critical.
+  - Delay reason.
+  - Recommended action.
+- The dashboard uses an explicit Candidate Tracker delay field when available:
+  - `Stage Delay`
+  - `Stage Delay Days`
+  - `Delay Days`
+  - `Days in Stage`
+  - `Current Stage Delay`
+  - `Stage Aging`
+  - `Stage Ageing`
+  - `Aging in Current Stage`
+- If the explicit delay field is not filled, days in stage are derived from
+  existing stage dates:
+  - Profile Received Date.
+  - Screen Date.
+  - TP-1 Date.
+  - TP2 Date / Customer Interview.
+  - TP3 Date / Customer Interview.
+  - Offer Date, if present.
+  - Customer Feedback Date, if present.
+  - Onboarding / Joining Date, if present.
+- Added TAG Profile Supply Trend:
+  - Month-wise profiles received.
+  - TAG profiles based on Candidate Tracker `Shared_by`.
+- Added data readiness indicators:
+  - Missing stage dates.
+  - Missing profile owner / `Shared_by`.
+  - Delay field filled percentage.
+- Candidate Stage Heatmap mini-block colors now represent SPOC ownership from
+  the first bracket in stage descriptions:
+  - TAG.
+  - CU.
+  - DU.
+- Electron Candidate Tracker parser now captures additional fields:
+  - Skill.
+  - Candidate status.
+  - Shared_by.
+  - Talent Navigator Score.
+  - Profile shared with Customer TP-2 / TP-3 round.
+  - Aging of TP-2 round.
+  - Aging of TP-3 round.
+  - Offer Date.
+  - Customer Feedback Date.
+  - Onboarding / Joining Date.
+  - Stage delay / days-in-stage aliases.
+
+Data Capture Needs for Stage Delay Accuracy
+-------------------------------------------
+- Candidate Tracker should consistently update:
+  - `Shared_by` for TAG profile supply reporting.
+  - Stage status fields for Screen, TP1, TP2, TP3, and Offer.
+  - Stage date fields whenever status changes.
+  - New stage delay / days-in-stage field, if manually maintained.
+- Recommended additional fields:
+  - Offer Date.
+  - Customer Feedback Date.
+  - Onboarding / Joining Date.
+  - Action owner.
+  - Action due date.
+  - Latest follow-up comment.
+
+
+v2.8.1 - Stage Delay Filter Simplification
+------------------------------------------
+- Stage Delay Dashboard top KPI cards removed.
+- Stage Delay filters simplified to:
+  - Demand Status.
+  - Customer.
+  - PM.
+- Stage, SPOC, and Severity filters removed from the filter bar.
+- TAG Profile Supply Trend now recalculates from the filtered delay rows, so
+  profile trend values respond to selected Demand Status, Customer, and PM.
+- Candidate Stage Delay Queue now includes Demand Status as a visible column.
+
+
+v2.8.2 - Stage Delay Exclusions
+-------------------------------
+- Stage Delay Dashboard now excludes candidates from delay calculations when
+  any candidate stage status indicates:
+  - Dropped.
+  - Rejected / Screen Reject.
+  - No Show.
+- Excluded candidates are removed before deriving:
+  - Delay by Stage.
+
+
+v2.8.3 - Stage Delay Cancellation Exclusion Scope
+-------------------------------------------------
+- Stage Delay Dashboard now also excludes Cancelled candidates from Delay by
+  Stage calculations.
+- Exclusion statuses now include:
+  - Dropped.
+  - Rejected / Screen Reject.
+  - No Show.
+  - Cancelled.
+- Exclusion scope is limited to Delay by Stage.
+- TAG Profile Supply Trend continues to count profiles after Demand Status,
+  Customer, and PM filters are applied, including profiles whose later outcome
+  was Dropped / Rejected / No Show / Cancelled.

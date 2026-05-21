@@ -11,6 +11,7 @@ const baseColumns = [
   { field: 'pmName', headerName: 'PM Name', minWidth: 150 },
   { field: 'billingStatus', headerName: 'Billing', minWidth: 140 },
   { field: 'wbsCodeCategory', headerName: 'WBS Type', minWidth: 110 },
+  { field: 'fte', headerName: 'FTE', type: 'number', minWidth: 90 },
   { field: 'allocationPct', headerName: 'Allocation %', type: 'number', minWidth: 120 },
   { field: 'band', headerName: 'Band', minWidth: 100 },
   { field: 'location', headerName: 'Location', minWidth: 130 },
@@ -70,6 +71,7 @@ export default function ResourceTable({ rows, height = 620, showPmoComments = fa
               <Typography><b>WBS Code:</b> {selected.wbsCode || 'Unspecified'}</Typography>
               <Typography><b>WBS Type:</b> {selected.wbsCodeCategory || 'Unspecified'}</Typography>
               <Typography><b>Billing:</b> {selected.billingStatus}</Typography>
+              <Typography><b>FTE:</b> {selected.fte}</Typography>
               <Typography><b>Allocation:</b> {selected.allocationPct}%</Typography>
               <Typography><b>Start:</b> {formatDate(selected.assignmentStart) || 'Unspecified'}</Typography>
               <Typography><b>End:</b> {formatDate(selected.assignmentEnd) || 'Unspecified'}</Typography>

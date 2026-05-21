@@ -1,7 +1,7 @@
-9{
+{
   "name": "resourcing-control-tower",
   "version": "1.0.0",
-  "description": "Offline Windows desktop resourcing control tower built with React and Electron.",
+  "description": "Offline Windows desktop Resource Assignation System built with React and Electron.",
   "author": "Resource Command Center",
   "main": "electron/main.js",
   "private": true,
@@ -9,7 +9,7 @@
     "dev": "vite --host 127.0.0.1",
     "electron:dev": "cross-env NODE_ENV=development concurrently \"npm run dev\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "build": "vite build",
-    "dist": "npm run build && electron-builder --config electron-builder.json",
+    "dist": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.json",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
@@ -34,6 +34,6 @@
   },
   "build": {
     "appId": "com.resourcing.controltower",
-    "productName": "Resourcing Control Tower"
+    "productName": "Resource Assignation System (RAS)"
   }
 }

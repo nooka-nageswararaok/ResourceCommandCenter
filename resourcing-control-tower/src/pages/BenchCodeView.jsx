@@ -37,7 +37,7 @@ export default function BenchCodeView({ records }) {
         ))}
       </div>
       <section className="kpi-grid compact">
-        <KPIWidget label="Bench Flagged" value={filtered.filter((record) => record.benchFlag).length} tone="red" />
+        <KPIWidget label="Bench FTE" value={filtered.reduce((sum, record) => sum + (record.benchFlag ? Number(record.fte || 0) : 0), 0)} tone="red" />
         <KPIWidget label="Y-Code" value={kpis.yCodeCount} tone="amber" />
         <KPIWidget label="C-Code" value={kpis.cCodeCount} tone="blue" />
         <KPIWidget label="Non Billable" value={kpis.nonBillableCount} tone="red" />

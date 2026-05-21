@@ -19,7 +19,7 @@ export default function HomeDashboard({ records, meta, navigate }) {
       </div>
 
       <section className="kpi-grid">
-        <KPIWidget label="Total Headcount" value={kpis.totalHeadcount} onClick={() => navigate('resources')} />
+        <KPIWidget label="Total FTE" value={kpis.totalHeadcount} onClick={() => navigate('resources')} />
         <KPIWidget label="Utilization %" value={`${kpis.utilizationPct}%`} tone="blue" onClick={() => navigate('resources')} />
         <KPIWidget label="Billable Count" value={kpis.billableCount} tone="green" onClick={() => navigate('billing', { billingStatus: 'Billable' })} />
         <KPIWidget label="Contractual Shadow" value={kpis.contractualShadowCount} tone="blue" onClick={() => navigate('billing', { billingStatus: 'Contractual Shadow' })} />

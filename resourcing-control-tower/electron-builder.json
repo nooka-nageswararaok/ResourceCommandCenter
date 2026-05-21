@@ -1,12 +1,15 @@
 {
   "appId": "com.resourcing.controltower",
-  "productName": "Resourcing Control Tower",
+  "productName": "Resource Assignation System (RAS)",
   "directories": {
     "output": "release"
   },
+  "afterPack": "build/afterPack.js",
   "files": [
     "dist/**/*",
     "electron/**/*",
+    "build/icon.ico",
+    "build/icon.png",
     "package.json"
   ],
   "extraResources": [
@@ -20,8 +23,9 @@
   ],
   "win": {
     "target": "nsis",
-    "artifactName": "${productName}-${version}-Setup.${ext}",
-    "signAndEditExecutable": false
+    "icon": "build/icon.ico",
+    "signAndEditExecutable": false,
+    "artifactName": "${productName}-${version}-Setup.${ext}"
   },
   "nsis": {
     "oneClick": false,

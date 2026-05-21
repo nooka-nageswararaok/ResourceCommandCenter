@@ -25,7 +25,7 @@ export default function ResourceMaster({ records, initialFilters = {} }) {
       <section className="table-section">
         <div className="page-title-row">
           <div>
-            <h1>Resource Master</h1>
+            <h1>RAS Master</h1>
             <p>{filtered.length} resources match current filters</p>
           </div>
         </div>

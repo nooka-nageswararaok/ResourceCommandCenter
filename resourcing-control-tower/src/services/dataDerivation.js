@@ -17,7 +17,8 @@ const headerAliases = {
   pmName: ['pm name', 'pmname'],
   pmoComments: ['pmo comments', 'pmocomments'],
   billingStatus: ['billing status', 'billing', 'billability', 'status'],
-  allocationPct: ['allocation %', 'allocation pct', 'allocation percent', 'allocation', 'fte'],
+  fte: ['fte'],
+  allocationPct: ['allocation %', 'allocation pct', 'allocation percent', 'allocation'],
   assignmentStart: ['assignment start', 'start date', 'project start date'],
   assignmentEnd: ['assignment end', 'end date', 'project end date', 'roll off date']
 };
@@ -59,6 +60,12 @@ const parseAllocationPct = (value) => {
     return Math.round(number * 100);
   }
   return number;
+};
+
+const parseFte = (value, allocationPct) => {
+  const number = parseNumber(value);
+  if (number > 0) return number;
+  return allocationPct ? allocationPct / 100 : 0;
 };
 
 export function parseDate(value) {
@@ -148,6 +155,8 @@ export function normalizeCsvRows(rows = []) {
         .filter(Boolean)
     };
 
+    const allocationPct = parseAllocationPct(readField(row, headerMap, 'allocationPct'));
+
     const assignment = {
       empId,
       projectName: readField(row, headerMap, 'projectName'),
@@ -158,7 +167,8 @@ export function normalizeCsvRows(rows = []) {
       pmName: readField(row, headerMap, 'pmName'),
       pmoComments: readField(row, headerMap, 'pmoComments'),
       billingStatus,
-      allocationPct: parseAllocationPct(readField(row, headerMap, 'allocationPct')),
+      allocationPct,
+      fte: parseFte(readField(row, headerMap, 'fte'), allocationPct),
       assignmentStart,
       assignmentEnd
     };
@@ -175,7 +185,7 @@ export function normalizeCsvRows(rows = []) {
     };
   });
 
-  const resources = records.map(({ projectName, projectCode, wbsCode, wbsCodeCategory, customer, billingStatus, allocationPct, assignmentStart, assignmentEnd, ...resource }) => resource);
+  const resources = records.map(({ projectName, projectCode, wbsCode, wbsCodeCategory, customer, billingStatus, allocationPct, fte, assignmentStart, assignmentEnd, ...resource }) => resource);
   const assignments = records.map(({ employeeName, band, subBand, location, manager, capability, skills, daysToEnd, endRiskFlag, agingDays, benchFlag, id, ...assignment }) => assignment);
 
   return { resources, assignments, records };
@@ -233,30 +243,135 @@ export function applyQuickFilters(records, filters) {
 }
 
 export function buildKpis(records) {
-  const totalHeadcount = new Set(records.map((record) => record.empId)).size;
-  const billableCount = records.filter((record) => record.billingStatus === 'Billable').length;
-  const nonBillableCount = records.filter((record) => ['Non Billable', 'Non-Billable'].includes(record.billingStatus)).length;
+  const totalHeadcount = sumFte(records);
+  const billableCount = sumFte(records, (record) => record.billingStatus === 'Billable');
+  const nonBillableCount = sumFte(records, (record) => ['Non Billable', 'Non-Billable'].includes(record.billingStatus));
   const utilizationPct = totalHeadcount ? Math.round(((totalHeadcount - nonBillableCount) / totalHeadcount) * 100) : 0;
 
   return {
     totalHeadcount,
     utilizationPct,
     billableCount,
-    contractualShadowCount: records.filter((record) => record.billingStatus === 'Contractual Shadow').length,
+    contractualShadowCount: sumFte(records, (record) => record.billingStatus === 'Contractual Shadow'),
     nonBillableCount,
-    yCodeCount: records.filter((record) => record.wbsCodeCategory === 'Y-Code').length,
-    cCodeCount: records.filter((record) => record.wbsCodeCategory === 'C-Code').length,
-    fresherCount: records.filter((record) => record.fresherFlag).length,
-    endingThirtyDays: records.filter((record) => record.endRiskFlag).length
+    yCodeCount: sumFte(records, (record) => record.wbsCodeCategory === 'Y-Code'),
+    cCodeCount: sumFte(records, (record) => record.wbsCodeCategory === 'C-Code'),
+    fresherCount: sumFte(records, (record) => record.fresherFlag),
+    endingThirtyDays: sumFte(records, (record) => record.endRiskFlag)
   };
 }
 
 export function groupCount(records, field) {
   const counts = records.reduce((acc, record) => {
     const key = record[field] || 'Unspecified';
-    acc[key] = (acc[key] || 0) + 1;
+    acc[key] = roundCount((acc[key] || 0) + Number(record.fte || 0));
     return acc;
   }, {});
 
   return Object.entries(counts).map(([name, value]) => ({ name, value }));
+}
+
+const roundCount = (value) => Math.round(value * 100) / 100;
+
+function sumFte(records, predicate = () => true) {
+  return roundCount(records.reduce((sum, record) => sum + (predicate(record) ? Number(record.fte || 0) : 0), 0));
+}
+
+function utilizationFor(records) {
+  const total = sumFte(records);
+  const nonBillable = sumFte(records, (record) => record.billingStatus === 'Non Billable');
+  return total ? Math.round(((total - nonBillable) / total) * 100) : 0;
+}
+
+export function buildLeadershipActions(records) {
+  const actions = [];
+
+  records.forEach((record) => {
+    const owner = record.pmName || record.manager || 'Unassigned';
+    const context = {
+      empId: record.empId,
+      employeeName: record.employeeName,
+      pmName: owner,
+      recordId: record.id,
+      customer: record.customer,
+      projectName: record.projectName,
+      billingStatus: record.billingStatus,
+      wbsCodeCategory: record.wbsCodeCategory,
+      daysToEnd: record.daysToEnd,
+      pmoComments: record.pmoComments || ''
+    };
+
+    if (typeof record.daysToEnd === 'number' && record.daysToEnd >= 0 && record.daysToEnd <= 15) {
+      actions.push({
+        id: `${record.id}-end-15`,
+        priority: 'High',
+        actionType: 'End Date Decision',
+        recommendedAction: 'Confirm extension, replacement, or release decision',
+        dueInDays: Math.max(record.daysToEnd, 0),
+        ...context
+      });
+    } else if (typeof record.daysToEnd === 'number' && record.daysToEnd > 15 && record.daysToEnd <= 30) {
+      actions.push({
+        id: `${record.id}-end-30`,
+        priority: 'Medium',
+        actionType: 'End Date Follow-up',
+        recommendedAction: 'Validate assignment continuity plan',
+        dueInDays: record.daysToEnd,
+        ...context
+      });
+    }
+
+    if (record.billingStatus === 'Non Billable') {
+      actions.push({
+        id: `${record.id}-non-billable`,
+        priority: record.agingDays > 30 ? 'High' : 'Medium',
+        actionType: 'Non Billable Conversion',
+        recommendedAction: 'Move to billable demand or approve bench plan',
+        dueInDays: 7,
+        ...context
+      });
+    }
+
+    if (record.wbsCodeCategory === 'Y-Code' || record.wbsCodeCategory === 'C-Code') {
+      actions.push({
+        id: `${record.id}-wbs-code`,
+        priority: record.wbsCodeCategory === 'Y-Code' ? 'High' : 'Medium',
+        actionType: `${record.wbsCodeCategory} Review`,
+        recommendedAction: 'Review code ageing and closure path',
+        dueInDays: 7,
+        ...context
+      });
+    }
+
+  });
+
+  const priorityOrder = { High: 0, Medium: 1, Low: 2 };
+  return actions.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority] || a.dueInDays - b.dueInDays);
+}
+
+export function buildPmAccountability(records) {
+  const grouped = records.reduce((acc, record) => {
+    const pmName = record.pmName || 'Unassigned';
+    acc[pmName] = acc[pmName] || [];
+    acc[pmName].push(record);
+    return acc;
+  }, {});
+
+  return Object.entries(grouped)
+    .map(([pmName, pmRecords]) => {
+      const kpis = buildKpis(pmRecords);
+      return {
+        id: pmName,
+        pmName,
+        headcount: sumFte(pmRecords),
+        utilizationPct: utilizationFor(pmRecords),
+        billableCount: kpis.billableCount,
+        nonBillableCount: kpis.nonBillableCount,
+        yCodeCount: kpis.yCodeCount,
+        cCodeCount: kpis.cCodeCount,
+        endingThirtyDays: kpis.endingThirtyDays,
+        highPriorityActions: buildLeadershipActions(pmRecords).filter((action) => action.priority === 'High').length
+      };
+    })
+    .sort((a, b) => b.highPriorityActions - a.highPriorityActions || b.nonBillableCount - a.nonBillableCount);
 }

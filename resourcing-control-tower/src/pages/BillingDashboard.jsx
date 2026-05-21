@@ -44,7 +44,7 @@ export default function BillingDashboard({ records, initialFilters = {} }) {
       </div>
 
       <section className="kpi-grid compact">
-        <KPIWidget label="Headcount" value={kpis.totalHeadcount} />
+        <KPIWidget label="Total FTE" value={kpis.totalHeadcount} />
         <KPIWidget label="Billable" value={kpis.billableCount} tone="green" />
         <KPIWidget label="Contractual Shadow" value={kpis.contractualShadowCount} tone="blue" />
         <KPIWidget label="Non Billable" value={kpis.nonBillableCount} tone="red" />
