@@ -1,15 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, CircularProgress } from '@mui/material';
+import { Button, CircularProgress, IconButton, Tooltip } from '@mui/material';
 import { DataGrid, GridToolbar } from '@mui/x-data-grid';
-import { ArrowBack, FolderOpen, Refresh } from '@mui/icons-material';
-import KPIWidget from '../../components/KPIWidget.jsx';
-import { getFulfilmentData, selectFulfilmentExcelFile } from '../../services/fulfilmentService.js';
-import { buildCandidateSummary } from '../../services/fulfilmentAnalysis.js';
+import { ArrowBack, Email, FolderOpen, Refresh } from '@mui/icons-material';
+import { draftHtmlEmail, getFulfilmentData, selectFulfilmentExcelFile } from '../../services/fulfilmentService.js';
+import { isActiveDemandStatus } from '../../services/fulfilmentAnalysis.js';
 
 const initialMeta = {
   fileName: '',
   filePath: '',
-  sheetName: 'Active SR',
+  sheetName: 'SF Datadump',
   candidateSheetName: 'Candidate Tracker',
   refreshedAt: '',
   warning: ''
@@ -20,6 +19,7 @@ export default function CandidateDetailsDashboard({ navigate, initialState = {} 
   const [candidateRows, setCandidateRows] = useState([]);
   const [stageClassification, setStageClassification] = useState({ groups: [], stages: [] });
   const [selectedLegacyJobReqId, setSelectedLegacyJobReqId] = useState(initialState.legacyJobReqId || '');
+  const [selectedStageCode, setSelectedStageCode] = useState('');
   const [meta, setMeta] = useState(initialMeta);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -36,7 +36,7 @@ export default function CandidateDetailsDashboard({ navigate, initialState = {} 
         setMeta({
           fileName: payload.fileName || '',
           filePath: payload.filePath || '',
-          sheetName: payload.sheetName || 'Active SR',
+          sheetName: payload.sheetName || 'SF Datadump',
           candidateSheetName: payload.candidateSheetName || 'Candidate Tracker',
           refreshedAt: payload.refreshedAt || '',
           warning: payload.warning || ''
@@ -63,11 +63,16 @@ export default function CandidateDetailsDashboard({ navigate, initialState = {} 
     () =>
       [...new Set(
         activeDemandRows
-          .filter((row) => String(row.status || '').trim().toLowerCase() === 'active')
+          .filter((row) => isActiveDemandStatus(row.status))
           .map((row) => row.legacyJobReqId)
           .filter(Boolean)
       )].sort((a, b) => String(a).localeCompare(String(b))),
     [activeDemandRows]
+  );
+
+  const selectedDemand = useMemo(
+    () => activeDemandRows.find((row) => row.legacyJobReqId === selectedLegacyJobReqId) || {},
+    [activeDemandRows, selectedLegacyJobReqId]
   );
 
   const visibleCandidateRows = useMemo(
@@ -90,11 +95,25 @@ export default function CandidateDetailsDashboard({ navigate, initialState = {} 
     [activeDemandRows, candidateRows, selectedLegacyJobReqId, stageClassification]
   );
 
-  const summary = useMemo(() => buildCandidateSummary(visibleCandidateRows), [visibleCandidateRows]);
   const stageCards = useMemo(
     () => buildStageCards(visibleCandidateRows, stageClassification),
     [visibleCandidateRows, stageClassification]
   );
+  const selectedSkillCluster = String(selectedDemand.skillCluster || '').trim();
+
+  const draftCandidateStageEmail = async (status) => {
+    const draft = buildCandidateStageEmailDraft({
+      stageStatus: status.label,
+      selectedLegacyJobReqId,
+      selectedDemand,
+      rows: getCandidatePipelineRows(visibleCandidateRows, status.stageCode)
+    });
+    try {
+      await draftHtmlEmail({ subject: draft.subject, htmlBody: draft.htmlBody });
+    } catch {
+      window.location.href = `mailto:?subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(stripHtmlToText(draft.htmlBody))}`;
+    }
+  };
 
   return (
     <main className="page">
@@ -130,32 +149,31 @@ export default function CandidateDetailsDashboard({ navigate, initialState = {} 
       ) : meta.warning ? (
         <div className="state-panel">
           <strong>{meta.warning}</strong>
-          <span>Use Choose Fulfilment Excel to load a workbook that contains Active SR and Candidate Tracker.</span>
+          <span>Use Choose Fulfilment Excel to load a workbook that contains SF Datadump and Candidate Tracker.</span>
         </div>
       ) : (
         <>
           <section className="candidate-selector-panel">
-            <label>
-              Select Legacy Job Req Id
-              <select value={selectedLegacyJobReqId} onChange={(event) => setSelectedLegacyJobReqId(event.target.value)}>
-                <option value="">Select a demand</option>
-                {legacyJobReqOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-              </select>
-            </label>
-            <span>Tip: double-click an Active Demands row or use its Candidates action to open this dashboard directly.</span>
-          </section>
-
-          <section className="kpi-grid compact fulfilment-kpi-grid">
-            <KPIWidget label="Total Candidates" value={summary.totalCandidates} tone="blue" />
-            <KPIWidget label="Screen Select %" value={`${summary.screenSelectPct}%`} tone="green" />
-            <KPIWidget label="TP-1 Select %" value={`${summary.tp1SelectPct}%`} tone="amber" />
-            <KPIWidget label="TP-2 Select %" value={`${summary.tp2SelectPct}%`} tone="amber" />
-            <KPIWidget label="TP-3 Select %" value={`${summary.tp3SelectPct}%`} tone="amber" />
-            <KPIWidget label="Offers" value={summary.offers} tone="green" />
-            <KPIWidget label="Offer Conversion %" value={`${summary.offerConversionPct}%`} tone="green" />
-            <KPIWidget label="Pending Interviews" value={summary.pendingInterviewCount} tone="amber" />
-            <KPIWidget label="Rejected" value={summary.rejectionCount} tone="red" />
-            <KPIWidget label="Avg Profile to Offer" value={`${summary.avgProfileToOfferDays}d`} />
+            <div className="candidate-selector-card">
+              <label>
+                Select Legacy Job Req Id
+                <select
+                  value={selectedLegacyJobReqId}
+                  onChange={(event) => {
+                    setSelectedLegacyJobReqId(event.target.value);
+                    setSelectedStageCode('');
+                  }}
+                >
+                  <option value="">Select a demand</option>
+                  {legacyJobReqOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="candidate-demand-kpi">
+              <span>Job Requisition ID/Demand ID</span>
+              <strong title={selectedDemand.demandId || ''}>{selectedDemand.demandId || '--'}</strong>
+            </div>
+            <span className="candidate-selector-tip">Tip: double-click an Active Demands row or use its Candidates action to open this dashboard directly.</span>
           </section>
 
           <section className="plain-section">
@@ -166,21 +184,55 @@ export default function CandidateDetailsDashboard({ navigate, initialState = {} 
                   Stage classification is sourced from {stageClassification.sourceFileName || 'Stage_Classification.xlsx'}
                   {stageClassification.sheetName ? ` / ${stageClassification.sheetName}` : ''}.
                 </p>
+                <p className="candidate-stage-skill-cluster">
+                  Skill Cluster: {selectedSkillCluster || '--'}
+                </p>
               </div>
+              {selectedStageCode ? <Button variant="outlined" size="small" onClick={() => setSelectedStageCode('')}>Clear Stage Drilldown</Button> : null}
             </div>
             <div className="candidate-stage-heatmap">
               {stageCards.map((stage) => (
-                <div className={`candidate-stage-block ${stage.level}`} key={stage.key} title={`${stage.label}: ${stage.count}`}>
+                <div className="candidate-stage-block" key={stage.key} title={`${stage.label}: ${stage.count}`}>
                   <div className="candidate-stage-heading">
                     <strong>{stage.count}</strong>
                     <span>{stage.label}</span>
                   </div>
                   <div className="candidate-status-blocks">
                     {stage.statuses.map((status) => (
-                      <span className={`candidate-status-block ${status.level}`} key={status.key} title={status.description}>
-                        <b>{status.count}</b>
-                        <i>{status.label}</i>
-                      </span>
+                      <div
+                        className={`candidate-status-card ${selectedStageCode === status.stageCode ? 'selected-drilldown' : ''}`}
+                        key={status.key}
+                      >
+                        <button
+                          className={`candidate-status-block ${status.level}`}
+                          type="button"
+                          title={status.description}
+                          onClick={() => setSelectedStageCode(status.stageCode)}
+                        >
+                          <b>{status.count}</b>
+                          <span>
+                            <i>{status.label}</i>
+                            {status.lastProfileReceivedDate ? (
+                              <small className="candidate-profile-date-badge" title={`Last Profile Received Date: ${status.lastProfileReceivedDate}`}>
+                                Last Profile: {status.lastProfileReceivedDate}
+                              </small>
+                            ) : null}
+                          </span>
+                        </button>
+                        <Tooltip title="Draft email">
+                          <span>
+                            <IconButton
+                              aria-label={`Draft email for ${status.label}`}
+                              className="candidate-status-email"
+                              disabled={!status.count}
+                              onClick={() => draftCandidateStageEmail(status)}
+                              size="small"
+                            >
+                              <Email fontSize="small" />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -194,14 +246,14 @@ export default function CandidateDetailsDashboard({ navigate, initialState = {} 
                 <h2>Candidate Pipeline</h2>
                 <p>
                   {selectedLegacyJobReqId
-                    ? `${visibleCandidateRows.length} candidate rows for ${selectedLegacyJobReqId}`
+                    ? `${getCandidatePipelineRows(visibleCandidateRows, selectedStageCode).length} candidate rows for ${selectedLegacyJobReqId}${selectedStageCode ? ` / stage ${selectedStageCode}` : ''}`
                     : 'Select a Legacy Job Req Id to populate candidate details.'}
                 </p>
               </div>
             </div>
             <div className="data-grid-shell">
               <DataGrid
-                rows={visibleCandidateRows}
+                rows={getCandidatePipelineRows(visibleCandidateRows, selectedStageCode)}
                 columns={columns}
                 autoHeight
                 density="compact"
@@ -231,7 +283,130 @@ function getStatusCellClass(field, value) {
   return '';
 }
 
+function getCandidatePipelineRows(rows, selectedStageCode) {
+  if (!selectedStageCode) return rows;
+  return rows.filter((row) => row.stageCode === selectedStageCode);
+}
+
+function buildCandidateStageEmailDraft({ stageStatus, selectedLegacyJobReqId, selectedDemand, rows }) {
+  const subject = stageStatus || 'Candidate Stage Status';
+  const fallbackCustomer = rows.find((row) => row.customer)?.customer || '';
+  const filters = [
+    ['Legacy Job Req Id', selectedLegacyJobReqId],
+    ['Job Requisition ID/Demand ID', selectedDemand.demandId],
+    ['Customer', selectedDemand.customer || fallbackCustomer],
+    ['Stage Status', stageStatus],
+    ['Filtered Candidate Count', rows.length]
+  ];
+  const headers = [
+    'S.No',
+    'Candidate Name',
+    'Customer',
+    'External/Internal',
+    'SAP ID',
+    'Stage',
+    'Stage Detail'
+  ];
+  const rowValues = rows.map((row, index) => [
+    index + 1,
+    row.candidateName,
+    row.customer,
+    row.externalInternal,
+    row.sapId,
+    row.stageCode,
+    row.stageDetail
+  ]);
+
+  return {
+    subject,
+    htmlBody: buildHtmlEmailBody({ stageStatus, filters, headers, rowValues })
+  };
+}
+
+function formatEmailValue(value) {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return text || '--';
+}
+
+function buildHtmlEmailBody({ stageStatus, filters, headers, rowValues }) {
+  const summaryRows = filters
+    .map(([label, value]) => `
+      <tr>
+        <th style="text-align:left;padding:8px 10px;border:1px solid #d9e2ec;background:#f4f7fb;color:#334454;width:220px;">${escapeHtml(label)}</th>
+        <td style="padding:8px 10px;border:1px solid #d9e2ec;color:#17202a;">${escapeHtml(formatEmailValue(value))}</td>
+      </tr>
+    `)
+    .join('');
+  const headerCells = headers
+    .map((header) => `<th style="padding:8px 10px;border:1px solid #c8d3df;background:#244354;color:#ffffff;text-align:left;font-weight:700;">${escapeHtml(header)}</th>`)
+    .join('');
+  const candidateRows = rowValues.length
+    ? rowValues
+      .map((values, index) => `
+        <tr style="background:${index % 2 ? '#f8fafc' : '#ffffff'};">
+          ${values.map((value) => `<td style="padding:8px 10px;border:1px solid #d9e2ec;color:#17202a;vertical-align:top;">${escapeHtml(formatEmailValue(value))}</td>`).join('')}
+        </tr>
+      `)
+      .join('')
+    : `<tr><td colspan="${headers.length}" style="padding:10px;border:1px solid #d9e2ec;color:#607080;">No candidate rows matched this stage status.</td></tr>`;
+
+  return `
+<!DOCTYPE html>
+<html>
+  <body style="margin:0;padding:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#17202a;">
+    <div style="font-size:14px;line-height:1.45;">
+      <p>Hi Team,</p>
+      <p>Please find below the candidate details filtered from the Candidate Stage Heatmap for <strong>${escapeHtml(formatEmailValue(stageStatus))}</strong>.</p>
+
+      <h3 style="margin:18px 0 8px;color:#244354;font-size:16px;">Filter Summary</h3>
+      <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;max-width:760px;margin-bottom:18px;">
+        <tbody>${summaryRows}</tbody>
+      </table>
+
+      <h3 style="margin:18px 0 8px;color:#244354;font-size:16px;">Filtered Candidate Details</h3>
+      <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;font-size:12px;">
+        <thead><tr>${headerCells}</tr></thead>
+        <tbody>${candidateRows}</tbody>
+      </table>
+
+      <p style="margin-top:18px;">Regards,<br/>Resource Fulfilment Team</p>
+    </div>
+  </body>
+</html>`.trim();
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function stripHtmlToText(value) {
+  return String(value || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>|<\/tr>|<\/h3>/gi, '\n')
+    .replace(/<\/td>|<\/th>/gi, '\t')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function classifyCandidateStage(row, stageClassification) {
+  const trackerStage = parseTrackerStageStatus(row.stageStatus, stageClassification);
+  if (trackerStage.stageCode || trackerStage.stageDetail) {
+    return trackerStage;
+  }
+
   const offerStatus = normalize(row.offerStatus);
   if (offerStatus) return buildStageResult(stageClassification, 'Onboarding', row.offerStatus, 'Selected', 'offer');
 
@@ -248,6 +423,39 @@ function classifyCandidateStage(row, stageClassification) {
   if (screenStatus) return buildStageResult(stageClassification, 'Profile Sourcing', row.screenStatus, bucketStatus(screenStatus), 'screen');
 
   return buildStageResult(stageClassification, 'Profile Sourcing', 'No Stage Update', 'No Update', 'profile');
+}
+
+function parseTrackerStageStatus(value, stageClassification) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return { stageName: '', stageCode: '', stageDetail: '', stageStatus: '', stageBucket: 'No Update' };
+  }
+
+  const [stageCodePart, ...detailParts] = text.split('-');
+  const stageCode = String(stageCodePart || '').trim();
+  const stageDetail = detailParts.join('-').trim();
+  const stageName = getStageGroupFromCode(stageCode, stageClassification) || getFallbackStageLabel(stageCode);
+
+  return {
+    stageName,
+    stageCode,
+    stageDetail,
+    stageStatus: text,
+    stageBucket: bucketStatus(normalize(stageDetail || text))
+  };
+}
+
+function getStageGroupFromCode(stageCode, stageClassification) {
+  const code = String(stageCode || '').trim();
+  if (!code) return '';
+  const matchedStage = (stageClassification?.stages || []).find((stage) => String(stage.stage || '').trim() === code);
+  if (matchedStage?.group) return matchedStage.group;
+  if (code.startsWith('1.')) return 'Profile Sourcing';
+  if (code.startsWith('2.')) return 'TP1';
+  if (code.startsWith('3.')) return 'TP2';
+  if (code.startsWith('4.')) return 'Customer Feedback';
+  if (code.startsWith('5.')) return 'Onboarding';
+  return '';
 }
 
 function buildStageResult(stageClassification, preferredGroup, status, stageBucket, processLabel) {
@@ -307,39 +515,78 @@ function getFallbackStageLabel(group) {
 }
 
 function buildStageCards(rows, stageClassification) {
-  const classifiedGroups = stageClassification?.groups?.length
-    ? stageClassification.groups
-    : ['Profile Received', 'Screening', 'TP1 Interview', 'TP2 Interview', 'TP3 Interview', 'Offer'];
+  const classifiedGroups = ['Profile Sourcing', 'TP1', 'TP2', 'Customer Feedback', 'Onboarding'];
   const counts = new Map(classifiedGroups.map((label) => [label, 0]));
-  const stageCounts = new Map();
+  const stageRows = new Map();
 
   rows.forEach((row) => {
-    counts.set(row.stageName, (counts.get(row.stageName) || 0) + 1);
+    const group = normalizeHeatmapStageGroup(row.stageName);
+    if (group) counts.set(group, (counts.get(group) || 0) + 1);
     if (row.stageCode) {
-      stageCounts.set(row.stageCode, (stageCounts.get(row.stageCode) || 0) + 1);
+      if (!stageRows.has(row.stageCode)) {
+        stageRows.set(row.stageCode, {
+          stage: row.stageCode,
+          description: row.stageDetail || row.stageStatus || row.stageCode,
+          count: 0,
+          lastProfileReceivedDate: ''
+        });
+      }
+      const stageRow = stageRows.get(row.stageCode);
+      stageRow.count += 1;
+      stageRow.lastProfileReceivedDate = getLatestProfileReceivedDate(stageRow.lastProfileReceivedDate, row.profileReceivedDate);
     }
   });
 
-  const maxCount = Math.max(...counts.values(), 1);
   return classifiedGroups.map((label) => {
     const count = counts.get(label) || 0;
-    const intensity = count / maxCount;
     const stageDefinitions = getStageDefinitionsForGroup(stageClassification, label);
     return {
       key: label,
       label,
       count,
-      statuses: stageDefinitions.map((stage) => ({
-        key: stage.stage,
-        label: stage.stage,
-        description: stage.description,
-        spoc: getStageSpoc(stage),
-        count: stageCounts.get(stage.stage) || 0,
-        level: `${getStageBlockLevel(stageCounts.get(stage.stage) || 0, count)} ${getStageSpocClass(stage)}`
-      })),
-      level: intensity > 0.75 ? 'high' : intensity > 0.4 ? 'medium' : 'low'
+      statuses: getVisibleStageDefinitions(stageDefinitions, stageRows, label)
+        .map((stage) => {
+          const stageCount = stage.count ?? 0;
+          return {
+            key: stage.stage,
+            label: formatStageStatusLabel(stage),
+            description: formatStageStatusLabel(stage),
+            stageCode: stage.stage,
+            spoc: getStageSpoc(stage),
+            count: stageCount,
+            lastProfileReceivedDate: stage.lastProfileReceivedDate || '',
+            level: `${getStageBlockLevel(stageCount, count)} ${getStageSpocClass(stage)}`
+          };
+        })
+        .filter((stage) => stage.count > 0)
     };
   });
+}
+
+function normalizeHeatmapStageGroup(value) {
+  const group = normalizeStageGroup(value);
+  if (group === 'profilesourcing' || group === 'profilereceived' || group === 'screening') return 'Profile Sourcing';
+  if (group === 'tp1' || group === 'tp1interview') return 'TP1';
+  if (group === 'tp2' || group === 'tp2interview') return 'TP2';
+  if (group === 'customerfeedback' || group === 'tp3interview') return 'Customer Feedback';
+  if (group === 'onboarding' || group === 'offer') return 'Onboarding';
+  return '';
+}
+
+function getVisibleStageDefinitions(stageDefinitions, stageRows, group) {
+  const activeStages = [...stageRows.values()]
+    .filter((stage) => normalizeStageGroup(getStageGroupFromCode(stage.stage, { stages: [] })) === normalizeStageGroup(group));
+
+  return activeStages.length ? activeStages.sort((a, b) => compareStageCodes(a.stage, b.stage)) : stageDefinitions;
+}
+
+function formatStageStatusLabel(stage) {
+  const stageCode = String(stage?.stage || '').trim();
+  const description = String(stage?.description || '').trim();
+  if (!stageCode) return description;
+  if (!description) return stageCode;
+  if (description.toLowerCase().startsWith(stageCode.toLowerCase())) return description;
+  return `${stageCode}-${description}`;
 }
 
 function getStageDefinitionsForGroup(stageClassification, group) {
@@ -407,6 +654,49 @@ function getStageBlockLevel(count, stageTotal) {
   if (intensity > 0.5) return 'high';
   if (intensity > 0.2) return 'medium';
   return 'low';
+}
+
+function getLatestProfileReceivedDate(currentValue, nextValue) {
+  const current = normalizeProfileDate(currentValue);
+  const next = normalizeProfileDate(nextValue);
+  if (!next.label) return current.label;
+  if (!current.label) return next.label;
+  if (next.timestamp !== null && current.timestamp !== null) {
+    return next.timestamp >= current.timestamp ? next.label : current.label;
+  }
+  if (next.timestamp !== null) return next.label;
+  if (current.timestamp !== null) return current.label;
+  return String(next.label).localeCompare(String(current.label)) >= 0 ? next.label : current.label;
+}
+
+function normalizeProfileDate(value) {
+  const label = String(value || '').trim();
+  if (!label) return { label: '', timestamp: null };
+  const timestamp = parseProfileDateTimestamp(label);
+  return { label, timestamp };
+}
+
+function parseProfileDateTimestamp(value) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+
+  const nativeTimestamp = Date.parse(text);
+  if (!Number.isNaN(nativeTimestamp)) return nativeTimestamp;
+
+  const dateParts = text.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
+  if (dateParts) {
+    const first = Number(dateParts[1]);
+    const second = Number(dateParts[2]);
+    const yearPart = Number(dateParts[3]);
+    const year = yearPart < 100 ? 2000 + yearPart : yearPart;
+    const dayFirst = first > 12;
+    const month = dayFirst ? second : first;
+    const day = dayFirst ? first : second;
+    const timestamp = new Date(year, month - 1, day).getTime();
+    return Number.isNaN(timestamp) ? null : timestamp;
+  }
+
+  return null;
 }
 
 function bucketStatus(status) {

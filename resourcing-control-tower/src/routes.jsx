@@ -16,6 +16,8 @@ import CandidateDetailsDashboard from './pages/fulfilment/CandidateDetailsDashbo
 import StageDelayDashboard from './pages/fulfilment/StageDelayDashboard.jsx';
 import FulfilmentLeadershipReview from './pages/fulfilment/FulfilmentLeadershipReview.jsx';
 import FulfilmentBaseDashboard from './pages/fulfilment/FulfilmentBaseDashboard.jsx';
+import QualityProfileTrendDashboard from './pages/fulfilment/QualityProfileTrendDashboard.jsx';
+import TagDashboard from './pages/fulfilment/TagDashboard.jsx';
 
 export const resourcingRoutes = [
   { key: 'resourcing/home', legacyKey: 'home', path: '/resourcing/home', module: 'resourcing', label: 'Home / Executive View', component: HomeDashboard },
@@ -70,8 +72,22 @@ export const moduleRoutes = [
         key: 'resource-fulfilment/stage-delay',
         path: '/resource-fulfilment/stage-delay',
         module: 'resource-fulfilment',
-        label: 'Stage Delay Dashboard',
+        label: 'Trend Dashboard',
         component: StageDelayDashboard
+      },
+      {
+        key: 'resource-fulfilment/quality-profile-trend',
+        path: '/resource-fulfilment/quality-profile-trend',
+        module: 'resource-fulfilment',
+        label: 'Quality of Profile Trend',
+        component: QualityProfileTrendDashboard
+      },
+      {
+        key: 'resource-fulfilment/tag-dashboard',
+        path: '/resource-fulfilment/tag-dashboard',
+        module: 'resource-fulfilment',
+        label: 'TAG Dashboard',
+        component: TagDashboard
       },
       {
         key: 'resource-fulfilment/base-dashboard',

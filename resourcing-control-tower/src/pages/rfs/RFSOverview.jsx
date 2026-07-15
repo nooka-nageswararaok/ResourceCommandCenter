@@ -30,7 +30,7 @@ export default function RFSOverview() {
   const [detailRows, setDetailRows] = useState([]);
   const [meta, setMeta] = useState(initialMeta);
   const [quarter, setQuarter] = useState('AMJ');
-  const [filters, setFilters] = useState({ customerGroups: [], pm: '', eeEnNn: '', onOff: '' });
+  const [filters, setFilters] = useState({ year: '', customerGroups: [], pm: '', eeEnNn: '', onOff: '' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
@@ -77,13 +77,18 @@ export default function RFSOverview() {
   const filteredDetailRows = useMemo(
     () =>
       activeDetailRows.filter((row) => {
+        if (filters.year && String(row.year || '') !== filters.year) return false;
         if (filters.customerGroups.length && !filters.customerGroups.includes(row.customerGroup)) return false;
         if (filters.pm && row.pm !== filters.pm) return false;
         if (filters.eeEnNn && row.eeEnNn !== filters.eeEnNn) return false;
         if (filters.onOff && row.onOff !== filters.onOff) return false;
         return true;
       }),
-    [activeDetailRows, filters.customerGroups, filters.eeEnNn, filters.onOff, filters.pm]
+    [activeDetailRows, filters.customerGroups, filters.eeEnNn, filters.onOff, filters.pm, filters.year]
+  );
+  const yearOptions = useMemo(
+    () => [...new Set(activeDetailRows.map((row) => String(row.year || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [activeDetailRows]
   );
   const customerGroupOptions = useMemo(
     () => [...new Set(activeDetailRows.map((row) => row.customerGroup).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
@@ -107,6 +112,10 @@ export default function RFSOverview() {
     () => buildOutputRows(filteredSummaryRows, filteredGrandTotal, monthConfig),
     [filteredGrandTotal, filteredSummaryRows, monthConfig]
   );
+  const detailOutputRows = useMemo(
+    () => buildDetailOutputRows(filteredDetailRows, monthConfig),
+    [filteredDetailRows, monthConfig]
+  );
   const gridRows = useMemo(
     () => (filteredGrandTotal ? [...filteredSummaryRows, filteredGrandTotal] : filteredSummaryRows),
     [filteredGrandTotal, filteredSummaryRows]
@@ -114,6 +123,10 @@ export default function RFSOverview() {
 
   const updateCustomerGroups = (event) => {
     setFilters((current) => ({ ...current, customerGroups: Array.from(event.target.selectedOptions).map((option) => option.value) }));
+  };
+
+  const updateYear = (value) => {
+    setFilters((current) => ({ ...current, year: value }));
   };
 
   const updatePm = (value) => {
@@ -130,17 +143,34 @@ export default function RFSOverview() {
 
   const updateQuarter = (value) => {
     setQuarter(value);
-    setFilters({ customerGroups: [], pm: '', eeEnNn: '', onOff: '' });
+    setFilters({ year: '', customerGroups: [], pm: '', eeEnNn: '', onOff: '' });
     loadData(false, value);
   };
 
   const handleExport = async () => {
-    setStatus('Preparing RFS summary export...');
+    setStatus('Preparing RFS export...');
     try {
-      const result = await exportRfsSummary({ rows: outputRows, outputSheetName: meta.outputSheetName });
-      setStatus(result.canceled ? 'Export cancelled.' : `RFS summary saved: ${result.filePath}`);
+      const result = await exportRfsSummary({
+        rows: outputRows,
+        detailRows: detailOutputRows,
+        outputSheetName: meta.outputSheetName
+      });
+      setStatus(result.canceled ? 'Export cancelled.' : `RFS workbook saved: ${result.filePath}`);
     } catch (err) {
       setStatus(err.message || 'Unable to export RFS summary.');
+    }
+  };
+
+  const handleDetailExport = async () => {
+    setStatus('Preparing Active Source Detail export...');
+    try {
+      const result = await exportRfsSummary({
+        rows: detailOutputRows,
+        outputSheetName: 'Active Source Detail'
+      });
+      setStatus(result.canceled ? 'Export cancelled.' : `Active Source Detail saved: ${result.filePath}`);
+    } catch (err) {
+      setStatus(err.message || 'Unable to export Active Source Detail.');
     }
   };
 
@@ -162,7 +192,7 @@ export default function RFSOverview() {
             Refresh RFS
           </Button>
           <Button variant="outlined" startIcon={<Download />} onClick={handleExport} disabled={loading || !filteredSummaryRows.length}>
-            Export Summary
+            Export RFS
           </Button>
         </div>
       </div>
@@ -188,6 +218,13 @@ export default function RFSOverview() {
               RFS Quarter
               <select value={quarter} onChange={(event) => updateQuarter(event.target.value)}>
                 {rfsQuarters.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+            </label>
+            <label>
+              Year
+              <select value={filters.year} onChange={(event) => updateYear(event.target.value)}>
+                <option value="">All</option>
+                {yearOptions.map((option) => <option key={option} value={option}>{option}</option>)}
               </select>
             </label>
             <label>
@@ -255,6 +292,9 @@ export default function RFSOverview() {
                 <h2>Active Source Detail</h2>
                 <p>{filteredDetailRows.length} active rows from {meta.sourceSheetName}</p>
               </div>
+              <Button variant="outlined" size="small" startIcon={<Download />} onClick={handleDetailExport} disabled={loading || !filteredDetailRows.length}>
+                Export Detail
+              </Button>
             </div>
             <div className="data-grid-shell">
               <DataGrid
@@ -292,6 +332,7 @@ function buildSummaryColumns(months) {
 
 function buildDetailColumns(months) {
   return [
+    { field: 'year', headerName: 'Year', width: 100 },
     { field: 'customerGroup', headerName: 'Customer Group', minWidth: 220 },
     { field: 'customerName', headerName: 'Customer Name', minWidth: 230, flex: 1 },
     { field: 'projectStatus', headerName: 'Status', width: 110 },
@@ -317,6 +358,27 @@ function buildDetailColumns(months) {
       }
     ])
   ];
+}
+
+function buildDetailOutputRows(rows, months) {
+  return rows.map((row) => {
+    const output = {
+      Year: row.year || '',
+      'Customer Group': row.customerGroup || '',
+      'Customer Name': row.customerName || '',
+      Status: row.projectStatus || '',
+      'Project Code': row.projectCode || '',
+      'Project Name': row.projectName || '',
+      PM: row.pm || '',
+      'EE/EN/NN': row.eeEnNn || '',
+      'On/Off': row.onOff || ''
+    };
+    months.forEach((month) => {
+      output[`${month.label} Firm`] = Math.round(row[`${month.key}Firm`] || 0);
+      output[`${month.label} MP`] = Math.round(row[`${month.key}Mp`] || 0);
+    });
+    return output;
+  });
 }
 
 function buildOutputRows(summaryRows, grandTotal, months) {

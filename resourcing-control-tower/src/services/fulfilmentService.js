@@ -21,3 +21,11 @@ export async function exportFulfilmentSnapshot(payload) {
 
   return window.fulfilmentBridge.exportFulfilmentSnapshot(payload);
 }
+
+export async function draftHtmlEmail(payload) {
+  if (!window.fulfilmentBridge?.draftHtmlEmail) {
+    throw new Error('Electron HTML email draft bridge is unavailable. Run the app through Electron.');
+  }
+
+  return window.fulfilmentBridge.draftHtmlEmail(payload);
+}

@@ -17,6 +17,7 @@ export const PP_KPI_DEFINITIONS = [
   { key: 'revisedGm', label: 'Revised GM', digits: 0, kind: 'number' },
   { key: 'gmPct', label: 'GM%', digits: 1, kind: 'percent' },
   { key: 'totalProjectExpenses', label: 'Total Project Exp', digits: 0, kind: 'number' },
+  { key: 'badDepts', label: 'Bad Depts', digits: 0, kind: 'number' },
   { key: 'realization', label: 'Realization', digits: 0, kind: 'number' },
   { key: 'totalArc', label: 'Total ARC', digits: 0, kind: 'number' },
   { key: 'totalGfte', label: 'Total GFTE', digits: 2, kind: 'number' },
@@ -255,6 +256,7 @@ export function buildPpCustomerRows(rows = []) {
         revisedDrc: round(kpis.revisedDrc),
         revisedGm: round(kpis.revisedGm),
         totalProjectExpenses: round(kpis.totalProjectExpenses),
+        badDepts: round(kpis.badDepts),
         totalGfte: round(kpis.totalGfte, 2),
         totalAfte: round(kpis.totalAfte, 2),
         totalBfte: round(kpis.totalBfte, 2),
@@ -307,6 +309,7 @@ function sumMetrics(rows) {
       revisedDrc: acc.revisedDrc + Number(row.revisedDrc || 0),
       revisedGm: acc.revisedGm + Number(row.revisedGm || 0),
       totalProjectExpenses: acc.totalProjectExpenses + Number(row.totalProjectExpenses || 0),
+      badDepts: acc.badDepts + Number(row.badDepts || 0),
       totalGfte: acc.totalGfte + Number(row.totalGfte || 0),
       totalAfte: acc.totalAfte + Number(row.totalAfte || 0),
       totalBfte: acc.totalBfte + Number(row.totalBfte || 0)
@@ -316,6 +319,7 @@ function sumMetrics(rows) {
       revisedDrc: 0,
       revisedGm: 0,
       totalProjectExpenses: 0,
+      badDepts: 0,
       totalGfte: 0,
       totalAfte: 0,
       totalBfte: 0

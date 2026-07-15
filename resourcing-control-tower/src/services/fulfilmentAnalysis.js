@@ -7,7 +7,12 @@ const agingBands = [
 ];
 
 export function getActiveDemands(rows = []) {
-  return rows.filter((row) => String(row.status || '').trim().toLowerCase() === 'active');
+  return rows.filter((row) => isActiveDemandStatus(row.status));
+}
+
+export function isActiveDemandStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase();
+  return normalized === 'open';
 }
 
 export function buildDemandSummary(rows = []) {

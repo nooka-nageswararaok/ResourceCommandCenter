@@ -17,7 +17,7 @@ import {
 const initialMeta = {
   fileName: '',
   filePath: '',
-  sheetName: 'Active SR',
+  sheetName: 'SF Datadump',
   candidateSheetName: 'Candidate Tracker',
   refreshedAt: '',
   warning: ''
@@ -43,7 +43,7 @@ export default function FulfilmentLeadershipReview() {
         setMeta({
           fileName: payload.fileName || '',
           filePath: payload.filePath || '',
-          sheetName: payload.sheetName || 'Active SR',
+          sheetName: payload.sheetName || 'SF Datadump',
           candidateSheetName: payload.candidateSheetName || 'Candidate Tracker',
           refreshedAt: payload.refreshedAt || '',
           warning: payload.warning || ''
@@ -111,7 +111,7 @@ export default function FulfilmentLeadershipReview() {
       ) : meta.warning ? (
         <div className="state-panel">
           <strong>{meta.warning}</strong>
-          <span>Use Choose Fulfilment Excel to load a workbook that contains Active SR and Candidate Tracker.</span>
+          <span>Use Choose Fulfilment Excel to load a workbook that contains SF Datadump and Candidate Tracker.</span>
         </div>
       ) : (
         <>

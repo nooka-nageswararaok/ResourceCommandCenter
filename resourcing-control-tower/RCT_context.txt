@@ -1,7 +1,7 @@
 Resource Assignation System (RAS) - Application Context
 =======================================================
 
-Last updated: 2026-05-14
+Last updated: 2026-07-09
 
 
 Purpose
@@ -391,6 +391,10 @@ Parsing:
 - Electron loads the `Base` sheet using SheetJS dense mode.
 - `.xlsb`, `.xlsx`, `.xls`, and `.xlsm` are supported through Choose PP Excel.
 - Dense mode was required because full `.xlsb` parsing is large.
+- Oversized `.xlsx` PP reports whose `Base` worksheet XML exceeds Node's
+  single-string limit are handled by a targeted streaming XLSX parser fallback.
+  This was added for:
+  `C:\Users\nooka.nageswararaok\OneDrive - HCL TECHNOLOGIES LIMITED\Documents\Nagesh\Engagements\PP Report\ERS MEGA - GM Trend YTD Jun'26_MFG.xlsx`.
 
 
 PP Normalized Fields
@@ -422,6 +426,11 @@ Key fields:
 - `revisedDrc`
 - `revisedGm`
 - `totalProjectExpenses`
+  - Sourced from `Total Project Expenses` when present.
+  - Falls back to `Project Expenses` for older PP workbooks.
+- `badDepts`
+  - Sourced from `Bad Depts` / `Bad depts`.
+  - Also accepts `Bad Debts` / `Bad Debt` spelling variants.
 - `totalGfte`
 - `totalAfte`
 - `totalBfte`
@@ -470,14 +479,15 @@ The detailed KPI comparison uses this order:
 3. Revised GM
 4. GM%
 5. Total Project Expenses
-6. Realization
-7. Total ARC
-8. Total GFTE
-9. Total AFTE
-10. Total BFTE
-11. Unbilled
-12. GFTE Utili %
-13. AFTE Utili %
+6. Bad Depts
+7. Realization
+8. Total ARC
+9. Total GFTE
+10. Total AFTE
+11. Total BFTE
+12. Unbilled
+13. GFTE Utili %
+14. AFTE Utili %
 
 
 PP KPI Formulas
@@ -487,6 +497,10 @@ Direct:
 - Revised DRC
 - Revised GM
 - Total Project Expenses
+  - Uses the source `Total Project Expenses` column when available.
+  - Falls back to `Project Expenses` only for older PP workbooks that do not
+    contain `Total Project Expenses`.
+- Bad Depts
 - Total GFTE
 - Total AFTE
 - Total BFTE
@@ -638,6 +652,8 @@ Configured KPI sections:
 - Revised GM.
 - GM%.
 - Total Project Expenses.
+- Bad Depts is shown as a report KPI but does not have a configurable action
+  rule.
 - Total GFTE.
 - Total AFTE.
 - Total BFTE.
@@ -737,6 +753,9 @@ RFS Parsed Fields
 Key fields:
 - `l4Name`
 - `projectStatus`
+- `year`
+  - From `Year`, `Fiscal Year`, `FY`, or `RFS Year` when present.
+  - Falls back to the selected RFS quarter sheet year suffix.
 - `customerName`
 - `customerGroup`
 - `projectCode`
@@ -769,6 +788,7 @@ Controls:
 - Export Summary.
 
 Filters:
+- Year.
 - Customer Group
   - Multi-select.
 - Project Manager.
@@ -794,6 +814,7 @@ Tables:
   - Total RFS.
   - Grand Total row.
 - Active Source Detail.
+  - Includes Year.
   - Includes EE/EN/NN.
   - Includes On/Off.
 
@@ -801,7 +822,13 @@ Removed:
 - `RFS Summary Prompt` card.
 
 Export:
-- `Export Summary` saves the current filtered RFS summary as `.xlsx`.
+- `Export RFS` saves the current filtered RFS summary and Active Source Detail
+  as `.xlsx`.
+- `Export Detail` under Active Source Detail saves the current filtered source
+  detail table as `.xlsx`.
+- Exported workbook sheets:
+  - Selected-quarter RFS summary sheet.
+  - `Active Source Detail`.
 
 
 RFS and PP Relationship
@@ -1088,7 +1115,7 @@ v2.4.0 - Resource Fulfilment Module
   - `fulfilment:getData`.
   - `fulfilment:selectExcel`.
 - Selected fulfilment workbook is persisted in Electron `userData/settings.json`.
-- Active Demands Dashboard reads the `Active SR` worksheet.
+- Active Demands Dashboard reads the `SF Datadump` worksheet.
 - Active Demands Dashboard columns:
   - Status.
   - Offshore/Onsite.
@@ -1352,7 +1379,7 @@ v2.7.6 - Candidate Stage Heatmap and Billing Type
   - Billing Type.
   - Current Stage.
   - Stage Status.
-- Billing Type is joined from Active SR `Billing Loss`:
+- Billing Type is joined from SF Datadump `Billing Loss`:
   - Yes -> `Billing Loss`.
   - No/blank -> `Pro Active`.
 - Stage Status is derived from Candidate Tracker stage columns:
@@ -1369,7 +1396,7 @@ v2.7.6 - Candidate Stage Heatmap and Billing Type
 v2.7.7 - Candidate Stage Classification Workbook
 ------------------------------------------------
 - Candidate Details Dashboard now reads stage classification from local workbook:
-  `C:\Users\nooka.nageswararaok\Downloads\Stage_Classification.xlsx`.
+  `data/Stage_Classification.xlsx`.
 - Source worksheet:
   - `Resourcing`.
 - Electron fulfilment data now includes parsed stage groups and stage details:
@@ -1389,7 +1416,7 @@ v2.7.7 - Candidate Stage Classification Workbook
   - TP2 status maps to TP2.
   - TP3 status maps to Customer Feedback.
   - Offer status maps to Onboarding.
-- Billing Loss vs Pro Active classification continues to come from Active SR
+- Billing Loss vs Pro Active classification continues to come from SF Datadump
   `Billing Loss`.
 
 
@@ -1397,7 +1424,7 @@ v2.7.8 - Fulfilment Billing Type and Stage Card Layout
 ------------------------------------------------------
 - Active Demands Dashboard now shows Billing Loss / Pro Active directly on
   each Active Demand heatmap card.
-- Billing type source remains Active SR `Billing Loss`:
+- Billing type source remains SF Datadump `Billing Loss`:
   - Yes -> Billing Loss.
   - No/blank -> Pro Active.
 - Candidate Details Dashboard no longer mixes Billing Loss / Pro Active into
@@ -1461,7 +1488,7 @@ v2.8.0 - Fulfilment Stage Delay Dashboard
 -----------------------------------------
 - Added new Resource Fulfilment module screen:
   - Stage Delay Dashboard.
-- Stage Delay Dashboard uses Candidate Tracker, Active SR, and
+- Stage Delay Dashboard uses Candidate Tracker, SF Datadump, and
   Stage_Classification.xlsx to derive:
   - Current candidate stage.
   - Stage code.
@@ -1569,3 +1596,870 @@ v2.8.3 - Stage Delay Cancellation Exclusion Scope
 - TAG Profile Supply Trend continues to count profiles after Demand Status,
   Customer, and PM filters are applied, including profiles whose later outcome
   was Dropped / Rejected / No Show / Cancelled.
+
+
+v2.8.4 - SharePoint / OneDrive Synced Workbook Cache
+----------------------------------------------------
+- Excel file loading now supports workbooks selected from synced
+  SharePoint/OneDrive folders by copying the selected workbook to an Electron
+  `userData/workbook-cache` folder before parsing.
+- The cache helper is shared across workbook modules:
+  - RAS / Resource workbook.
+  - PP Analysis workbook.
+  - RFS Tracker workbook.
+  - Resource Fulfilment workbook.
+  - Stage Classification workbook.
+- Refresh behavior:
+  - Re-reads the original selected workbook path.
+  - Copies the latest bytes into the local workbook cache.
+  - Parses the cached workbook path with SheetJS.
+- Electron settings now persist the selected original workbook path and the
+  latest cached workbook path per module.
+- SharePoint browser URLs are explicitly rejected with a message telling the
+  user to select the synced local file path.
+- If a synced file cannot be hydrated/read, the app returns a user-facing
+  message asking the user to choose `Always keep on this device` and refresh.
+- If the workbook is locked or still syncing, the app returns a user-facing
+  message asking the user to close Excel or allow sync to finish and retry.
+
+
+v2.8.5 - Candidate Details Heatmap Layout Refinement
+----------------------------------------------------
+- Candidate Details Dashboard KPI cards were removed.
+- Candidate Stage Heatmap cards were enlarged so stage/status text is visible.
+- Candidate Stage Heatmap status blocks now use a wider two-column layout.
+- Stage/status labels wrap instead of being truncated with ellipses.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.8.6 - Active Demand Billing Loss Value
+-----------------------------------------
+- Active Demands Dashboard now shows the billing loss dollar value next to the
+  Billing Loss badge on Active Demand Heatmap cards.
+- Billing loss value is read from Column Q in the `SF Datadump` worksheet and
+  exposed as `billingLossValue`.
+- Billing loss values are formatted as USD currency on Billing Loss cards.
+- Pro Active cards continue to show only the Pro Active badge.
+- Candidate Stage Heatmap parent cards now use a consistent neutral card color.
+- Candidate Stage Heatmap stage-code blocks now show full code and description
+  text, for example `1.01-[TAG][EXT] Primary/Secondary skills`.
+- Candidate Stage Heatmap hides stage-code mini cards with value 0.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.8.7 - Active Demand Billing Flag Source and Stage Row Layout
+---------------------------------------------------------------
+- Active Demands Dashboard now uses SF Datadump Column AP as the Billing Loss
+  flag for Active Demand Heatmap card badge status.
+- SF Datadump Column Q remains the billing loss dollar value source for Billing
+  Loss cards.
+- Active Demand Heatmap non-billing-loss cards now show `Active` status.
+- Candidate Details Dashboard Candidate Stage Heatmap now keeps the five
+  parent stage cards in a single row with horizontal overflow when needed.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.8.8 - Fulfilment Heatmap Presentation Refinement
+---------------------------------------------------
+- Active Demand Heatmap non-billing-loss cards now show `Pro Active` status.
+- Candidate Stage Heatmap mini-card counts now use a larger font than the stage
+  description text.
+- Candidate Stage Heatmap mini-card stage description text now uses gray text
+  to visually separate it from the count.
+- Fulfilment Base Dashboard Hiring Mode Wise and Location Wise sections now use
+  heatmap cards instead of table grids.
+- Fulfilment Base Dashboard Hiring Mode Wise and Location Wise heatmaps no
+  longer show location/customer count columns.
+- Fulfilment Base Dashboard Month Wise and DM Wise heatmaps were swapped in the
+  grouped dashboard order.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.8.9 - Generic Stage Classification Workbook Path
+---------------------------------------------------
+- Stage classification workbook default path is now app/project local:
+  `data/Stage_Classification.xlsx`.
+- Removed the user-specific Downloads path dependency for
+  `Stage_Classification.xlsx`.
+- Packaged builds resolve the workbook from Electron `extraResources/data`.
+- Development builds resolve the workbook from the project `data` folder.
+
+
+v2.9.0 - Fulfilment Drilldowns and Data Quality
+-----------------------------------------------
+- Active Demands Dashboard now includes Billing Loss Summary.
+- Billing Loss Summary shows:
+  - Billing Loss Demands.
+  - Billing Loss Value.
+  - Aging >60.
+  - Zero Profiles.
+  - Top billing loss Customer.
+  - Top billing loss PM.
+- Billing Loss Summary cards click through into the Active Demand Heatmap by
+  applying the matching filter.
+- Active Demands Dashboard now includes a Data Quality Panel for:
+  - Missing PM.
+  - Missing Customer.
+  - Missing Legacy Job Req Id.
+  - Missing Billing Loss dollar value.
+  - Candidate Tracker SR values not found in SF Datadump.
+- Candidate Stage Heatmap mini-cards now drill down the Candidate Pipeline by
+  selected stage code.
+- Candidate Stage Heatmap selected stage drilldown is visually highlighted and
+  can be cleared.
+- Fulfilment Base Dashboard heatmap cards now apply click-to-filter drilldowns
+  for Customer, Month, Hiring Mode, Location, PSA, and DM.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.9.1 - Active Demand Summary Panel Layout
+-------------------------------------------
+- Active Demands Dashboard now shows Data Quality Panel above Billing Loss
+  Summary.
+- Data Quality Panel is collapsible and expanded by default.
+- Billing Loss Summary is collapsible and expanded by default.
+- Active Demand filters now appear below both summary panels.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.9.2 - Stage Delay Trend Dashboard
+------------------------------------
+- Stage Delay Dashboard now includes a Fulfilment Trend Dashboard.
+- Trend window selector supports:
+  - Last 3 months.
+  - Last 6 months.
+- Trend summary cards show:
+  - Open Demands.
+  - Profiles Internal.
+  - Profiles External.
+  - Onboarding Internal.
+  - Onboarding External.
+- Month-wise trend chart shows:
+  - Open Demands.
+  - Profiles Received split by Internal / External.
+  - Onboarding split by Internal / External.
+- Customer / Month wise trend table shows the same metrics by customer and
+  month.
+- Trend calculations follow the Stage Delay Dashboard filters:
+  - Demand Status.
+  - Customer.
+  - PM.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.9.3 - Trend Dashboard Base Onboarding Alignment
+--------------------------------------------------
+- Resource Fulfilment navigation label changed from Stage Delay Dashboard to
+  Trend Dashboard.
+- Trend Dashboard page title now shows `Trend Dashboard`.
+- Fulfilment Trend Dashboard is now positioned immediately below the Demand
+  Status, Customer, and PM filters.
+- Trend Dashboard onboarding metrics now read from the
+  `Fulfillment Details 2025&2026` sheet so onboarding internal and onboarding
+  external/lateral values align with Fulfilment Base Dashboard.
+- Onboarding split uses Fulfilment Base Dashboard hiring mode logic:
+  - Hiring Mode containing `Internal` -> Onboarding Internal.
+  - Hiring Mode containing `External` or `Lateral`, and other non-internal
+    modes -> Onboarding External.
+- Open demand and profile received trend metrics continue to use SF Datadump and
+  Candidate Tracker respectively.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.9.4 - Trend Dashboard Line Chart and Heatmap
+-----------------------------------------------
+- Trend Dashboard onboarding labels now align directly to Fulfilment Base
+  Dashboard KPI labels:
+  - `Internal Hiring` maps to `Onboarding Internal`.
+  - `Lateral Hiring` maps to `Onboarding External`.
+- Month-wise Trend Dashboard visualization changed from bar chart to line
+  chart.
+- Customer / Month Wise table was replaced with a Customer / Month Heatmap.
+- Heatmap blocks show:
+  - Open Demands.
+  - Profiles Internal.
+  - Profiles External.
+  - Onboarding Internal.
+  - Onboarding External.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.9.5 - Trend Dashboard Heatmap Placement and Month Parsing
+------------------------------------------------------------
+- Trend Dashboard now shows the Customer / Month Heatmap below the month-wise
+  line chart as a full-width section.
+- Fulfilment base month labels such as `May'26` are now parsed as May 2026
+  before generic JavaScript date parsing is attempted.
+- This fixes onboarding trend values that previously appeared as zero because
+  month labels from `Fulfillment Details 2025&2026` were not matching the trend
+  window.
+- Onboarding Internal continues to map from `Internal Hiring`.
+- Onboarding External continues to map from `Lateral Hiring`.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.9.6 - Trend Dashboard Fulfilment Percent Placement
+-----------------------------------------------------
+- Trend Dashboard now includes Internal Fulfilment % and External Fulfilment %
+  in KPI cards.
+- Fulfilment percentage lines remain available in the month-wise trend chart.
+- Customer / Month Heatmap now keeps count-only metric chips:
+  - Open.
+  - Profiles Internal.
+  - Profiles External.
+  - Onboarding Internal.
+  - Onboarding External.
+- Delay by Stage card remains removed from Trend Dashboard.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.9.7 - Candidate Details StageStatus Source
+---------------------------------------------
+- SF Datadump parser now captures `StageStatus` from column J.
+- Candidate Details Dashboard now derives Candidate Pipeline stage values from
+  SF Datadump `StageStatus`:
+  - Stage is the first substring before `-`.
+  - Stage Detail is the next substring after `-`.
+- Candidate Stage Heatmap now reflects the same SF Datadump `StageStatus`
+  stage and detail source.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.9.8 - Candidate Tracker StageStatus Correction
+-------------------------------------------------
+- Candidate Tracker parser now captures `StageStatus` from column J.
+- Candidate Details Dashboard now derives Candidate Pipeline stage values from
+  Candidate Tracker `StageStatus`:
+  - Stage is the first substring before `-`.
+  - Stage Detail is the next substring after `-`.
+- Candidate Stage Heatmap now reflects Candidate Tracker `StageStatus` as the
+  stage and detail source.
+- Candidate Details Dashboard no longer uses SF Datadump `StageStatus` for these
+  stage/detail values.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.9.9 - Candidate Stage Heatmap Parent Order
+---------------------------------------------
+- Candidate Details Dashboard Candidate Stage Heatmap now always renders the
+  five parent cards in this order:
+  - Profile Sourcing.
+  - TP1.
+  - TP2.
+  - Customer Feedback.
+  - Onboarding.
+- Parent stage cards remain visible even when the count is 0.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.9.10 - Candidate Details Demand ID KPI
+-----------------------------------------
+- Candidate Details Dashboard now shows a Job Requisition ID/Demand ID KPI card
+  next to the Select Legacy Job Req Id selector.
+- The KPI value is sourced from the selected SF Datadump demand row's
+  `Job Requisition ID/Demand ID` field.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.9.11 - Active Demand StageStatus Heatmap Counts
+--------------------------------------------------
+- Active Demand Heatmap now derives the TP1, TP2, Customer, and Onboarded card
+  values from Candidate Tracker `StageStatus` instead of SF Datadump summary
+  columns.
+- Candidate Tracker rows are counted per demand by matching Candidate Tracker
+  `SR` to SF Datadump `Legacy Job Req Id`.
+- The previous `TP3` heatmap label is now shown as `Customer`.
+- TP1 counts Candidate Tracker `StageStatus` codes:
+  - `2.01` through `2.10`.
+  - `2.13` through `2.16`.
+- TP2 counts Candidate Tracker `StageStatus` codes:
+  - `3.01` through `3.04`.
+  - `3.08` through `3.11`.
+- Customer counts Candidate Tracker `StageStatus` codes:
+  - `3.12`.
+  - `3.14`.
+  - `3.15`.
+- Onboarded counts Candidate Tracker `StageStatus` codes:
+  - `4.01` through `4.10`.
+  - `5.1` through `5.7`.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.9.12 - RFS Year Filter and Detail Export
+-------------------------------------------
+- RFS Tracker now includes a Year filter.
+- RFS detail rows expose `year` from source year fields when present, with a
+  selected-quarter sheet suffix fallback.
+- Active Source Detail table now includes a Year column.
+- RFS export now writes both:
+  - Selected-quarter RFS summary.
+  - Active Source Detail.
+- The export action label is now `Export RFS`.
+- Active Source Detail now has its own `Export Detail` button.
+- Latest Windows installer build completed successfully after this update.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`
+
+
+v2.9.13 - Active Demand Billing Loss Drilldown Refinement
+---------------------------------------------------------
+- Active Demands Dashboard Billing Loss Summary now includes:
+  - Billing Loss Demands.
+  - Billing Loss Value.
+  - Aging >30.
+  - Aging >60.
+  - Zero Profiles.
+  - Top billing loss Customer.
+- Removed the Top billing loss PM card from Billing Loss Summary.
+- Billing Loss Summary drilldowns now apply specific Active Demand Heatmap
+  filters for:
+  - Billing loss demand scope.
+  - Aging >30 billing loss demands.
+  - Aging >60 billing loss demands.
+  - Zero profile billing loss demands.
+  - Top billing loss customer demand count.
+- Clear Billing Drilldown now clears all billing-loss drilldown scopes.
+- Production renderer build completed successfully after this update:
+  `npm.cmd run build`.
+
+
+v2.9.30 - TAG Dashboard
+------------------------
+- Resource Fulfilment now includes a `TAG Dashboard`.
+- Route:
+  - `/resource-fulfilment/tag-dashboard`
+- TAG Dashboard reads the TAG demand/supply workbook:
+  `C:\Users\nooka.nageswararaok\Downloads\FTE GEO_Demand vs. Supply Report_17-Jun'26 v1.xlsb`.
+- Parsed sheets:
+  - `Demand data`.
+  - `Early Pipeline`.
+  - `MTD Offered`.
+  - `MTD Renege`.
+  - `MTD Declined`.
+  - `Yet to Joiner`.
+  - `Past Joiner`.
+  - `Rejected`.
+- Candidate rows are joined to demands by `Legacy Job Req Id`, with
+  `Job Requisition ID` as fallback.
+- Default filters:
+  - LOB: `ERS`.
+  - Project L1: `ERS VDU`.
+  - Project L4: `ERS VDU-MEGA-MFG-DIGITAL ENGG1`.
+- TAG filter section includes:
+  - Project L1.
+  - Project L4.
+  - Demand Status.
+  - Customer.
+  - Hiring Manager.
+  - Application Status.
+  - Demand ID.
+- Dashboard sections:
+  - Executive TAG Snapshot.
+  - Early Pipeline Funnel.
+  - Application Status Mix.
+  - Demand Coverage And Gaps heatmap.
+  - Customer Hotspots heatmap.
+  - Early Pipeline Candidate Details.
+- TAG Dashboard accepts future navigation state with `legacyJobReqId` or
+  `demandId` so Active Demand cards can later open TAG details for the selected
+  demand without replacing the existing Candidate Details navigation.
+- Production renderer build completed successfully after this update:
+  `npm.cmd run build`.
+
+
+v2.9.31 - TAG Dashboard Heatmap Refinement
+------------------------------------------
+- TAG Dashboard removed:
+  - Recruiter Productivity.
+  - Source Productivity.
+- TAG Dashboard converted these sections from grids to heatmap cards:
+  - Demand Coverage And Gaps.
+  - Customer Hotspots.
+- Demand Coverage heatmap cards show demand ID, status, customer, role/skill,
+  Total positions from `Number of Openings`, actionable positions, candidate
+  count, ageing, and coverage risk.
+- Customer Hotspot heatmap cards show customer, coverage %, Total positions
+  from `Number of Openings`, actionable positions, candidate count,
+  zero-pipeline demand count, ageing >60, rejected, renege, and declined counts.
+- The previous internal `Gap` value was calculated as
+  `Actionable Position - Early Pipeline candidate count`; it is no longer shown
+  on TAG heatmap cards.
+
+
+v2.9.29 - Quality Profile Dropped / No Show Donut
+-------------------------------------------------
+- Quality of Profile Trend Dashboard now includes a second donut chart:
+  - `Dropped`.
+  - `No Show`.
+  - `Others`.
+- Dropped / No Show classification uses Candidate Tracker `StageStatus` text
+  when present and falls back to StageStatus codes:
+  - Dropped: `2.12`, `3.07`.
+  - No Show: `2.11`, `3.06`.
+- `Others` includes every remaining Candidate Tracker status in the selected
+  filter scope.
+- The Quality of Profile layout now shows the two donut charts as peer panels
+  with the summary section below them.
+- Production renderer build completed successfully after this update:
+  `npm.cmd run build`.
+- Latest Windows installer build completed successfully after this update:
+  `npm.cmd run dist`.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`.
+
+
+v2.9.28 - Active Demand Billing Loss Email Draft
+------------------------------------------------
+- Active Demands Dashboard Billing Loss Summary cards now include a draft-email
+  action, matching the Candidate Details Dashboard email flow.
+- Each Billing Loss Summary email uses the same drilldown scope as its card:
+  - Billing Loss Demands.
+  - Billing Loss Value.
+  - Aging >30.
+  - Aging >60.
+  - Zero Profiles.
+  - Top billing loss Customer.
+- Drafted email body includes Active Demand Heatmap card details for the
+  matching demands:
+  - Demand identifiers.
+  - Billing type and billing loss value.
+  - Role / Skill Cluster.
+  - Total, Remaining, Aging, Profiles.
+  - TP1, TP2, Customer, Onboarded, and Renege stage counts.
+  - Demand Customer and Status.
+- Billing Loss Summary email uses Electron `email:draftHtml` and falls back to
+  `mailto:` when the desktop email draft bridge is unavailable.
+- Production renderer build completed successfully after this update:
+  `npm.cmd run build`.
+
+
+v2.9.27 - Quality of Profile Trend Dashboard
+--------------------------------------------
+- Resource Fulfilment now includes a `Quality of Profile Trend` dashboard.
+- Route:
+  - `/resource-fulfilment/quality-profile-trend`
+- The dashboard reads Candidate Tracker `StageStatus` values and shows a pie
+  chart where all values are percentages against total visible profiles.
+- Quality buckets:
+  - `Profile Sourcing`: stage codes `1.15`, `2.11`, and `2.12`.
+  - `TP1 Reject`: stage codes `2.1` and `2.10`.
+  - `TP2 Dropped/No show`: stage codes `3.06` and `3.07`.
+  - `TP2 Reject`: stage code `3.05`.
+  - `Others`: all remaining profiles.
+- `2.1` and `2.10` are both counted for TP1 Reject because Excel/source
+  formatting can collapse trailing zeroes in stage-code display.
+- Filters:
+  - Project L4.
+  - Demand Status.
+  - Customer.
+  - Hiring Manager.
+  - Profile Month.
+- Project L4 defaults to `ERS VDU-MEGA-MFG-DIGITAL ENGG1`, matching the other
+  Resource Fulfilment dashboards.
+- Latest Windows installer build completed successfully after this update:
+  `npm.cmd run dist`.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`.
+
+
+v2.9.25 - Project L4 First Filter Alignment
+-------------------------------------------
+- Active Demands Dashboard now shows `Project L4` as the first filter.
+- Active Demands Dashboard Status, Customer, Month, Hiring Manager,
+  Offshore/Onsite, Location, Band, and CU Mapping option lists now derive from
+  the selected `Project L4` scope.
+- Trend Dashboard now shows `Project L4` as the first filter.
+- Trend Dashboard Demand Status, Customer, and Hiring Manager option lists now
+  derive from the selected `Project L4` scope.
+- Production renderer build completed successfully after this update:
+  `npm.cmd run build`.
+
+
+v2.9.14 - Candidate Stage Heatmap Email Draft
+---------------------------------------------
+- Candidate Details Dashboard Candidate Stage Heatmap now shows a mail action
+  beside each populated stage-status mini card.
+- The mail action now asks Electron to generate an unsent `.eml` HTML draft and
+  open it through the default desktop mail client.
+- Draft email subject uses the selected stage-status label.
+- Draft email body is now generated as a professional HTML email with:
+  - Filter Summary table.
+  - Filtered Candidate Details HTML table.
+  - Demand identifiers, customer, selected stage status, filtered candidate
+    count, and candidate row details.
+- The filtered candidate details table in the email body is limited to the
+  first seven columns:
+  - S.No.
+  - Candidate Name.
+  - Customer.
+  - External/Internal.
+  - SAP ID.
+  - Stage.
+  - Stage Detail.
+- If the desktop HTML draft bridge is unavailable, the app falls back to a
+  plain-text `mailto:` draft.
+- Stage classification continues to be reloaded from
+  `data/Stage_Classification.xlsx` on fulfilment refresh, and the corrected
+  workbook is included in packaged builds through `extraResources/data`.
+- Existing stage-status click-to-filter drilldown remains unchanged.
+- Production renderer build completed successfully after this update:
+  `npm.cmd run build`.
+- Electron main/preload syntax checks completed successfully after this update:
+  `node --check electron\main.js`
+  `node --check electron\preload.js`.
+
+
+v2.9.15 - Active Demand Renege Stage Count
+------------------------------------------
+- Active Demand Heatmap `Renege` metric now derives from Candidate Tracker
+  `StageStatus` instead of the SF Datadump renege column.
+- Renege is counted per demand by matching Candidate Tracker `SR` to SF Datadump
+  `Legacy Job Req Id`.
+- Renege count uses Candidate Tracker stage code `5.7`, including
+  `5.7 [DU] Report renege to L3 Operations team`.
+- Production renderer build completed successfully after this update:
+  `npm.cmd run build`.
+
+
+v2.9.16 - Active Demand Funnel Stage Count Alignment
+----------------------------------------------------
+- Active Demands Dashboard Demand Funnel now aggregates stage values using the
+  same demand-wise Candidate Tracker `StageStatus` logic as Active Demand
+  Heatmap cards.
+- Demand Funnel stage cards now summarize visible active demands for:
+  - Remaining.
+  - Profiles.
+  - TP1.
+  - TP2.
+  - Customer.
+  - Onboarded.
+  - Renege.
+- TP1, TP2, Customer, Onboarded, and Renege counts now come from Candidate
+  Tracker rows matched by `SR` to SF Datadump `Legacy Job Req Id`.
+- Production renderer build completed successfully after this update:
+  `npm.cmd run build`.
+
+
+v2.9.17 - Fulfilment SF Datadump Source Migration
+-------------------------------------------------
+- Resource Fulfilment dashboards now use `SF Datadump` as the sole base demand
+  worksheet going forward.
+- `SF Datadump` has two non-data rows before the header row; the parser now
+  locates the header row by SF headers such as:
+  - `Job Requisition ID`.
+  - `Legacy Job Req Id`.
+  - `Status`.
+- The previous SR/SF mapping worksheet was a one-time migration reference only
+  and is no longer read during workbook import.
+- Future fulfilment workbooks are not expected to contain the old demand base
+  worksheet or the migration mapping worksheet.
+- Fulfilment demand fields are now mapped directly from SF headers, including:
+  - `Customer Name (AIS)` -> customer.
+  - `Hiring Manager` -> PM.
+  - `Onshore/Offshore` -> offshore/onsite.
+  - `Role Name (Demand Unit)` -> role.
+  - `Personnel Sub Area Name` -> location.
+  - `Demand Sub Band Name` -> band.
+  - `Date Created` -> request date / demand month.
+  - `Number of Openings` -> total positions.
+  - `Actionable Position` -> remaining positions.
+  - `Demand_Ageing_days` -> aging days.
+  - `HR L4` -> CU mapping.
+  - `Billing Loss flag` -> billing-loss badge status.
+  - `Billing Loss` -> billing-loss value.
+- Open-demand calculations treat SF `Open` rows as active/open demand rows.
+- Production renderer build completed successfully after this update:
+  `npm.cmd run build`.
+
+
+v2.9.18 - Active Demand Project L4 Filter
+-----------------------------------------
+- Active Demands Dashboard now parses `Project L4` from `SF Datadump`.
+- Added a `Project L4` multi-select filter to the Active Demands Dashboard.
+- Active Demand filters now have a compact filter-section header with a top
+  `Clear Filters` action, matching the summary-panel action placement and
+  freeing the filter grid for filter controls.
+
+
+v2.9.19 - Active Demand Filter Width and Status Alignment
+---------------------------------------------------------
+- Active Demands Dashboard filter label changed from `PM` to `Hiring Manager`
+  to match the `SF Datadump` source header.
+- Active Demands Dashboard filter layout now gives more width to `Project L4`
+  and `CU Mapping` by reducing the Month, Location, and Band filter widths.
+- Active/open demand calculations now use only SF status `Open`.
+- `On Hold` and `Closed` remain available in the Status filter but are not
+  counted as active/open demand rows in active-demand KPIs or funnel counts.
+
+
+v2.9.20 - Active Demand Card Footer and Initial Render Performance
+------------------------------------------------------------------
+- Active Demands Dashboard now defaults the `Project L4` filter to
+  `ERS VDU-MEGA-MFG-DIGITAL ENGG1` on initial load.
+- `Clear Filters` still clears all filters, including the default Project L4
+  value.
+- Active Demand Heatmap cards now show Customer at the bottom-left of each
+  card.
+- Demand rows with Status `On Hold` now show an amber `ON HOLD` badge at the
+  bottom-right of each card.
+- Active Demand Heatmap rendering is capped to the first 600 currently visible
+  demand cards to avoid mounting thousands of cards after a broad filter clear;
+  the header still shows the full visible demand count.
+
+
+v2.9.21 - Active Demand KPI and Funnel SF Scope Correction
+----------------------------------------------------------
+- Active Demands Dashboard KPI cards now aggregate the currently filtered
+  `SF Datadump` demand rows directly instead of applying an additional
+  open-only status filter.
+- The first KPI card is now labeled `Filtered Demands` because it reflects the
+  current filter scope, including Status filter selections such as `Open`,
+  `On Hold`, or `Closed`.
+- Demand Funnel cards now aggregate from the mapped `SF Datadump` columns:
+  - `Actionable Position` -> Remaining.
+  - `Profiles Received` -> Profiles.
+  - `TP-1 Selected` -> TP1.
+  - `TP-2/Client Selected` -> TP2.
+  - `TP-3/Client Selected` -> Customer.
+  - `Onboarded` -> Onboarded.
+  - `Renege` -> Renege.
+- Candidate Tracker stage-status counts remain available for heatmap card
+  stage chips, but the summary KPI and Demand Funnel values now follow the
+  selected filter criteria and SF Datadump field mapping.
+
+
+v2.9.22 - Trend and Fulfilment Base SF Filter Alignment
+-------------------------------------------------------
+- Trend Dashboard now includes a `Project L4` filter sourced from
+  `SF Datadump`.
+- Trend Dashboard defaults `Project L4` to
+  `ERS VDU-MEGA-MFG-DIGITAL ENGG1`.
+- Trend Dashboard filter label changed from `PM` to `Hiring Manager`.
+- Trend Dashboard `Clear Filters` action moved to the top filter-section
+  header.
+- Trend Dashboard filtering now applies Project L4 consistently to:
+  - Candidate Stage Delay Queue.
+  - Fulfilment Trend Dashboard demand rows.
+  - Candidate profile trend rows.
+  - Onboarding rows joined from `Fulfillment Details 2025&2026`.
+- Fulfilment Base Dashboard now enriches `Fulfillment Details 2025&2026` rows
+  from `SF Datadump` by matching `SR#` to `Legacy Job Req Id` or
+  `Job Requisition ID` to `Job Requisition ID`.
+- Fulfilment Base Dashboard now defaults `Project L4` to
+  `ERS VDU-MEGA-MFG-DIGITAL ENGG1`.
+- Fulfilment Base Dashboard now includes `Project L4` and `Hiring Manager`
+  filters and detail-grid columns.
+- Fulfilment Base row count now defaults to 1 per fulfilment detail row when
+  the workbook does not contain a `Count` column.
+
+
+v2.9.23 - Trend Open Demand SF Balance Alignment
+------------------------------------------------
+- Trend Dashboard `Open Demands` now sums `Balance Positions` from
+  `SF Datadump` for rows where Status is `Open`.
+- This replaces the previous trend behavior that counted unique demand rows,
+  which under-counted open demand volume when a demand had multiple balance
+  positions.
+- Month-wise trend lines, trend summary cards, and Customer / Month Heatmap
+  `Open` chips now all use the same SF `Balance Positions` aggregation.
+
+
+v2.9.24 - Trend Dashboard Excel Formula Demand Metrics
+------------------------------------------------------
+- Trend Dashboard now includes the Excel-aligned demand metrics:
+  - New Demands: count of `SF Datadump` rows where `Date Created` falls inside
+    the month.
+  - New Positions: sum of `Number of Openings` for demands created in the
+    month.
+  - Open Demands: month-end backlog where `Date Created` is before the next
+    month, `Closed_Date` is blank or on/after the next month, and Status is not
+    `On Hold`.
+  - Open Positions: sum of `Number of Openings` for the same month-end backlog
+    demand scope.
+- Existing profile received, onboarding, and fulfilment percentage trend
+  metrics remain in the Trend Dashboard.
+- `SF Datadump` parsing now carries `Closed_Date` and `Number of Openings` for
+  Trend Dashboard calculations.
+- Production renderer build completed successfully after this update:
+  `npm.cmd run build`.
+
+
+v2.9.26 - Project L4 First Filter Alignment and Trend Validation
+----------------------------------------------------------------
+- Active Demands Dashboard shows `Project L4` as the first filter.
+- Active Demands Dashboard Status, Customer, Month, Hiring Manager,
+  Offshore/Onsite, Location, Band, and CU Mapping option lists derive from the
+  selected `Project L4` scope.
+- Trend Dashboard shows `Project L4` as the first filter.
+- Trend Dashboard Demand Status, Customer, and Hiring Manager option lists
+  derive from the selected `Project L4` scope.
+- Trend Dashboard `Project L4` options now source directly from `SF Datadump`
+  demand rows instead of candidate delay rows, so valid Project L4 values are
+  no longer collapsed to the default value plus `Unassigned`.
+- Excel serial `Closed_Date` values with fractional time are parsed as local
+  date-only values before month-end comparisons.
+- Trend Dashboard validation for `ERS VDU-MEGA-MFG-DIGITAL ENGG1` matches
+  `data/Trend.png`:
+  - Jan-2026: New Demands 24, New Positions 42, Open Demands 55,
+    Open Positions 97.
+  - Feb-2026: New Demands 39, New Positions 42, Open Demands 61,
+    Open Positions 94.
+  - Mar-2026: New Demands 23, New Positions 25, Open Demands 29,
+    Open Positions 46.
+  - Apr-2026: New Demands 27, New Positions 50, Open Demands 29,
+    Open Positions 63.
+  - May-2026: New Demands 51, New Positions 88, Open Demands 35,
+    Open Positions 76.
+  - Jun-2026: New Demands 17, New Positions 21, Open Demands 45,
+    Open Positions 83.
+- Current-month trend calculations use current date as the as-of cutoff.
+- Production renderer build completed successfully after this update:
+  `npm.cmd run build`.
+- Latest Windows installer build completed successfully after this update:
+  `npm.cmd run dist`.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.0-Setup.exe`.
+
+
+v2.9.32 - PP Oversized XLSX Base Streaming
+------------------------------------------
+- Fixed PP Report Analysis upload for the Jun FY26 `.xlsx` workbook:
+  `ERS MEGA - GM Trend YTD Jun'26_MFG.xlsx`.
+- Root cause:
+  - The workbook contains a `Base` worksheet, but `xl/worksheets/sheet4.xml`
+    expands to about 1.16 GB.
+  - SheetJS cannot materialize that worksheet as one string and previously
+    returned no loaded `Base` worksheet, which surfaced as:
+    `No worksheets found in pp_..._ERS_MEGA_-_GM_Trend_YTD_Jun'26_MFG.xlsx`.
+- PP parsing now falls back to a targeted streaming XLSX parser for oversized
+  `.xlsx` `Base` sheets.
+- Validation:
+  - The Jun workbook copy parsed `Base` successfully with 302,159 data rows.
+  - Electron main syntax check completed successfully:
+    `node --check electron\main.js`.
+  - Production renderer build completed successfully:
+    `npm.cmd run build`.
+
+
+v2.9.33 - PP Project Expense Source Column Alignment
+----------------------------------------------------
+- Cross-checked PP Report Analysis against:
+  `ERS MEGA - GM Trend YTD Jun'26_MFG.xlsx`.
+- Source validation:
+  - `Base` sheet contains 302,159 data rows.
+  - `Total Project Expenses` exists and totals 429,633.36 across the full
+    workbook.
+  - In the default `DIGITAL ENGG1` L4 scope, `Total Project Expenses` is zero
+    for `Jun'26`, while `Project Expenses` is 9,034.26 for `Jun'26`.
+- PP parsing now maps the `Total Project Exp` KPI from source column
+  `Project Expenses` when present, with `Total Project Expenses` retained as
+  fallback for older workbooks.
+- Validation:
+  - Electron main syntax check completed successfully:
+    `node --check electron\main.js`.
+  - Production renderer build completed successfully:
+    `npm.cmd run build`.
+
+
+v2.9.36 - PP Bad Depts KPI
+--------------------------
+- PP Report Analysis now includes `Bad Depts` in the detailed customer KPI
+  comparison and Grand Total Summary.
+- `Bad Depts` is summed like the other direct PP KPI measures across selected
+  customers, current period, comparison periods, and exports.
+- PP parsing accepts `Bad Depts` / `Bad depts` and `Bad Debts` / `Bad Debt`
+  header spelling variants.
+- Validation:
+  - Electron main syntax check completed successfully:
+    `node --check electron\main.js`.
+  - Production renderer build completed successfully:
+    `npm.cmd run build`.
+
+
+v2.9.37 - Active Demand Onsite Offshore Badge
+---------------------------------------------
+- Active Demand Heatmap cards now show the `Onshore/Offshore` value next to
+  the `Pro Active` / `Billing Loss` badge.
+- The value uses the existing parsed `offshoreOnsite` field from `SF Datadump`.
+- Production renderer build completed successfully after this update:
+  `npm.cmd run build`.
+
+
+v2.9.34 - Active Demand Referral Email Draft
+--------------------------------------------
+- Active Demands Dashboard now includes an `Email Demands` action in the
+  Active Demand Heatmap header.
+- The email drafts the complete currently filtered demand scope, including
+  rows beyond the heatmap's first-600-card render cap.
+- Email body addresses the team with the referral request text and includes
+  only these demand detail columns:
+  - Demand.
+  - Role / Skill Cluster.
+  - Remaining.
+  - Location.
+  - Status.
+- The action uses Electron `email:draftHtml` and falls back to a plain-text
+  `mailto:` draft when the desktop email draft bridge is unavailable.
+- Production renderer build completed successfully after this update:
+  `npm.cmd run build`.
+
+
+v2.9.35 - PP Total Project Expense Source Reversion
+---------------------------------------------------
+- PP Report Analysis `Total Project Exp` KPI now maps from source column
+  `Total Project Expenses`.
+- `Project Expenses` is retained only as a fallback when older workbooks do not
+  contain `Total Project Expenses`.
+- Honeywell validation against
+  `ERS MEGA - GM Trend YTD Jun'26_MFG.xlsx`:
+  - All Honeywell rows: `Total Project Expenses` = 3,280.38, rounded to 3,280.
+  - Honeywell `Jun'26` + `DIGITAL ENGG1`: `Total Project Expenses` = 0.
+- Validation:
+  - Electron main syntax check completed successfully:
+    `node --check electron\main.js`.
+  - Production renderer build completed successfully:
+    `npm.cmd run build`.
+
+
+v2.9.38 - Candidate Stage Date Badge And Nav Collapse
+-----------------------------------------------------
+- Candidate Details Dashboard Candidate Stage Heatmap stage-status cards now
+  show a `Last Profile` badge with the latest `Profile Received Date` for that
+  stage-code group.
+- The left navigation panel now auto-collapses after a route is selected from
+  the navigation menu.
+- Validation:
+  - Production renderer build completed successfully:
+    `npm.cmd run build`.

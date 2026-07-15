@@ -1,6 +1,8 @@
-const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { StringDecoder } = require('string_decoder');
+const zlib = require('zlib');
 const XLSX = require('xlsx');
 
 const RESOURCE_CHANNEL = 'resource:getData';
@@ -15,6 +17,9 @@ const EXPORT_RFS_CHANNEL = 'rfs:exportSummary';
 const FULFILMENT_CHANNEL = 'fulfilment:getData';
 const SELECT_FULFILMENT_CHANNEL = 'fulfilment:selectExcel';
 const EXPORT_FULFILMENT_CHANNEL = 'fulfilment:exportSnapshot';
+const TAG_CHANNEL = 'tag:getData';
+const SELECT_TAG_CHANNEL = 'tag:selectExcel';
+const DRAFT_HTML_EMAIL_CHANNEL = 'email:draftHtml';
 const COMMENTS_CHANNEL = 'comments:getData';
 const SAVE_RESOURCE_COMMENT_CHANNEL = 'comments:saveResource';
 const SAVE_PP_COMMENT_CHANNEL = 'comments:savePp';
@@ -22,7 +27,11 @@ const RESOURCE_WORKBOOK_NAME = 'Resource_Data.xlsx';
 const PP_WORKBOOK_PATH = "C:\\Users\\nooka.nageswararaok\\Downloads\\Final_MEGA Financial Trend FY'26 @FX27 Rates_IND.xlsb";
 const RFS_WORKBOOK_PATH = "C:\\Users\\nooka.nageswararaok\\OneDrive - HCL TECHNOLOGIES LIMITED\\Documents\\Nagesh\\Engagements\\PP Report\\RFS Tracker - FY'27 (10).xlsb";
 const FULFILMENT_WORKBOOK_PATH = "C:\\Users\\nooka.nageswararaok\\Downloads\\ERS VDU MEGA IND Digital Engg1 - SR Tracker-FY'25 - L2 report - 2026-05-15T170414.642.xlsx";
-const STAGE_CLASSIFICATION_PATH = "C:\\Users\\nooka.nageswararaok\\Downloads\\Stage_Classification.xlsx";
+const TAG_WORKBOOK_PATH = "C:\\Users\\nooka.nageswararaok\\Downloads\\FTE GEO_Demand vs. Supply Report_17-Jun'26 v1.xlsb";
+const STAGE_CLASSIFICATION_WORKBOOK_NAME = 'Stage_Classification.xlsx';
+const FULFILMENT_SOURCE_SHEET_NAME = 'SF Datadump';
+const FULFILMENT_CANDIDATE_SHEET_NAME = 'Candidate Tracker';
+const FULFILMENT_DETAILS_SHEET_NAME = 'Fulfillment Details 2025&2026';
 const SETTINGS_FILE_NAME = 'settings.json';
 const COMMENTS_FILE_NAME = 'comments.json';
 const APP_USER_MODEL_ID = 'com.resourcing.controltower';
@@ -70,6 +79,7 @@ let activeWorkbookPath = null;
 let activePpWorkbookPath = null;
 let activeRfsWorkbookPath = null;
 let activeFulfilmentWorkbookPath = null;
+let activeTagWorkbookPath = null;
 
 function getSettingsPath() {
   return path.join(app.getPath('userData'), SETTINGS_FILE_NAME);
@@ -188,9 +198,100 @@ function saveSelectedFulfilmentWorkbookPath(filePath) {
   saveSettings({ selectedFulfilmentWorkbookPath: filePath });
 }
 
+function loadSelectedTagWorkbookPath() {
+  if (activeTagWorkbookPath) return activeTagWorkbookPath;
+
+  try {
+    const settings = loadSettings();
+    activeTagWorkbookPath = settings.selectedTagWorkbookPath || null;
+    return activeTagWorkbookPath;
+  } catch {
+    return null;
+  }
+}
+
+function saveSelectedTagWorkbookPath(filePath) {
+  activeTagWorkbookPath = filePath;
+  saveSettings({ selectedTagWorkbookPath: filePath });
+}
+
+function getWorkbookCacheDir() {
+  return path.join(app.getPath('userData'), 'workbook-cache');
+}
+
+function isSharePointUrl(filePath) {
+  return /^https?:\/\//i.test(String(filePath || '')) || /^sharepoint:\/\//i.test(String(filePath || ''));
+}
+
+function safeFileName(value) {
+  return String(value || 'workbook')
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+    .replace(/\s+/g, '_')
+    .slice(0, 120);
+}
+
+function getCachedWorkbookSettingKey(moduleKey) {
+  return `${moduleKey}CachedWorkbookPath`;
+}
+
+function getWorkbookReadErrorMessage(filePath, error) {
+  if (isSharePointUrl(filePath)) {
+    return 'Please select the synced local file path, not the SharePoint web URL.';
+  }
+
+  const code = String(error?.code || '').toUpperCase();
+  const message = String(error?.message || '');
+  if (['EBUSY', 'EPERM', 'EACCES'].includes(code) || /busy|access|permission|locked|being used/i.test(message)) {
+    return 'The workbook is locked by another application or still syncing. Close Excel/allow sync to finish and retry.';
+  }
+
+  if (['ENOENT', 'ENOTDIR'].includes(code)) {
+    return `Excel input file not found: ${filePath}`;
+  }
+
+  return 'The selected SharePoint/OneDrive file is not available offline. Please right-click the file and choose "Always keep on this device", then refresh.';
+}
+
+function prepareWorkbookForRead(sourcePath, moduleKey) {
+  if (!sourcePath) {
+    throw new Error('No Excel workbook path was provided.');
+  }
+  if (isSharePointUrl(sourcePath)) {
+    throw new Error('Please select the synced local file path, not the SharePoint web URL.');
+  }
+  if (!fs.existsSync(sourcePath)) {
+    const error = new Error(`Excel input file not found: ${sourcePath}`);
+    error.code = 'ENOENT';
+    throw error;
+  }
+
+  let fileBuffer;
+  try {
+    fileBuffer = fs.readFileSync(sourcePath);
+  } catch (error) {
+    throw new Error(getWorkbookReadErrorMessage(sourcePath, error));
+  }
+
+  const cacheDir = getWorkbookCacheDir();
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const extension = path.extname(sourcePath) || '.xlsx';
+  const baseName = safeFileName(path.basename(sourcePath, extension));
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+  const cachedPath = path.join(cacheDir, `${safeFileName(moduleKey)}_${stamp}_${baseName}${extension}`);
+  fs.writeFileSync(cachedPath, fileBuffer);
+  saveSettings({ [getCachedWorkbookSettingKey(moduleKey)]: cachedPath });
+
+  return {
+    sourcePath,
+    cachedPath,
+    fileName: path.basename(sourcePath),
+    cachedFileName: path.basename(cachedPath)
+  };
+}
+
 function resolveWorkbookPath() {
   const selectedWorkbookPath = loadSelectedWorkbookPath();
-  if (selectedWorkbookPath && fs.existsSync(selectedWorkbookPath)) {
+  if (selectedWorkbookPath && (isSharePointUrl(selectedWorkbookPath) || fs.existsSync(selectedWorkbookPath))) {
     return selectedWorkbookPath;
   }
 
@@ -199,6 +300,17 @@ function resolveWorkbookPath() {
     path.join(process.cwd(), 'data', RESOURCE_WORKBOOK_NAME),
     path.join(path.dirname(process.execPath), 'data', RESOURCE_WORKBOOK_NAME),
     path.join(process.resourcesPath || '', 'data', RESOURCE_WORKBOOK_NAME)
+  ];
+
+  return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || candidates[0];
+}
+
+function resolveStageClassificationWorkbookPath() {
+  const candidates = [
+    path.join(__dirname, '..', 'data', STAGE_CLASSIFICATION_WORKBOOK_NAME),
+    path.join(process.cwd(), 'data', STAGE_CLASSIFICATION_WORKBOOK_NAME),
+    path.join(path.dirname(process.execPath), 'data', STAGE_CLASSIFICATION_WORKBOOK_NAME),
+    path.join(process.resourcesPath || '', 'data', STAGE_CLASSIFICATION_WORKBOOK_NAME)
   ];
 
   return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || candidates[0];
@@ -247,8 +359,24 @@ function toMonthLabel(value) {
   return `${month}'${year}`;
 }
 
-function normalizePpRows(rows) {
-  return rows.map((row, index) => ({
+function normalizeHeaderName(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function getPpSourceValue(row, aliases = []) {
+  for (const alias of aliases) {
+    if (Object.prototype.hasOwnProperty.call(row, alias)) return row[alias];
+  }
+
+  const normalizedAliases = aliases.map(normalizeHeaderName);
+  const matchingKey = Object.keys(row).find((key) => normalizedAliases.includes(normalizeHeaderName(key)));
+  return matchingKey ? row[matchingKey] : '';
+}
+
+function normalizePpRow(row, index) {
+  const projectExpenses = getPpSourceValue(row, ['Total Project Expenses', 'Project Expenses']);
+
+  return {
     id: index + 1,
     l4Mapping: row['L4 mapping'] || row['Project  L4 org unit'] || '',
     l3Mapping: row['L3 mapping'] || row['Project L3 Org. Unit'] || '',
@@ -273,14 +401,314 @@ function normalizePpRows(rows) {
     totalRevenue: toNumber(row['Total Revenue']),
     revisedDrc: toNumber(row['Revised DRC']),
     revisedGm: toNumber(row['Revised GM']),
-    totalProjectExpenses: toNumber(row['Total Project Expenses']),
+    totalProjectExpenses: toNumber(projectExpenses),
+    badDepts: toNumber(getPpSourceValue(row, ['Bad Depts', 'Bad depts', 'Bad Debts', 'Bad debts', 'Bad Debt', 'Bad debt'])),
     totalGfte: toNumber(row['Total GFTE']),
     totalAfte: toNumber(row['Total AFTE']),
     totalBfte: toNumber(row['Total BFTE'])
-  }));
+  };
 }
 
-function parsePpWorkbook(filePath) {
+function normalizePpRows(rows) {
+  return rows.map((row, index) => normalizePpRow(row, index));
+}
+
+function xmlDecode(value) {
+  return String(value || '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+function getXmlAttribute(xml, attributeName) {
+  const match = new RegExp(`${attributeName}="([^"]*)"`).exec(xml);
+  return match ? xmlDecode(match[1]) : '';
+}
+
+function findZipEntry(filePath, entryName) {
+  const stat = fs.statSync(filePath);
+  const tailLength = Math.min(stat.size, 1024 * 128);
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const tail = Buffer.alloc(tailLength);
+    fs.readSync(fd, tail, 0, tailLength, stat.size - tailLength);
+
+    let eocdOffset = -1;
+    for (let index = tailLength - 22; index >= 0; index -= 1) {
+      if (tail.readUInt32LE(index) === 0x06054b50) {
+        eocdOffset = stat.size - tailLength + index;
+        break;
+      }
+    }
+
+    if (eocdOffset < 0) {
+      throw new Error('Unable to locate XLSX ZIP directory.');
+    }
+
+    const eocd = Buffer.alloc(22);
+    fs.readSync(fd, eocd, 0, 22, eocdOffset);
+    const centralDirectorySize = eocd.readUInt32LE(12);
+    const centralDirectoryOffset = eocd.readUInt32LE(16);
+    const centralDirectory = Buffer.alloc(centralDirectorySize);
+    fs.readSync(fd, centralDirectory, 0, centralDirectorySize, centralDirectoryOffset);
+
+    let offset = 0;
+    while (offset < centralDirectory.length) {
+      if (centralDirectory.readUInt32LE(offset) !== 0x02014b50) break;
+
+      const compressionMethod = centralDirectory.readUInt16LE(offset + 10);
+      const compressedSize = centralDirectory.readUInt32LE(offset + 20);
+      const uncompressedSize = centralDirectory.readUInt32LE(offset + 24);
+      const fileNameLength = centralDirectory.readUInt16LE(offset + 28);
+      const extraLength = centralDirectory.readUInt16LE(offset + 30);
+      const commentLength = centralDirectory.readUInt16LE(offset + 32);
+      const localHeaderOffset = centralDirectory.readUInt32LE(offset + 42);
+      const fileName = centralDirectory.toString('utf8', offset + 46, offset + 46 + fileNameLength);
+
+      if (fileName === entryName) {
+        const localHeader = Buffer.alloc(30);
+        fs.readSync(fd, localHeader, 0, 30, localHeaderOffset);
+        if (localHeader.readUInt32LE(0) !== 0x04034b50) {
+          throw new Error(`Invalid XLSX ZIP local header for ${entryName}.`);
+        }
+
+        const localNameLength = localHeader.readUInt16LE(26);
+        const localExtraLength = localHeader.readUInt16LE(28);
+        return {
+          entryName,
+          compressionMethod,
+          compressedSize,
+          uncompressedSize,
+          dataOffset: localHeaderOffset + 30 + localNameLength + localExtraLength
+        };
+      }
+
+      offset += 46 + fileNameLength + extraLength + commentLength;
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+
+  return null;
+}
+
+function openZipEntryStream(filePath, entryName) {
+  const entry = findZipEntry(filePath, entryName);
+  if (!entry) {
+    throw new Error(`XLSX entry not found: ${entryName}`);
+  }
+
+  const source = fs.createReadStream(filePath, {
+    start: entry.dataOffset,
+    end: entry.dataOffset + entry.compressedSize - 1
+  });
+
+  if (entry.compressionMethod === 0) return source;
+  if (entry.compressionMethod === 8) return source.pipe(zlib.createInflateRaw());
+  throw new Error(`Unsupported XLSX ZIP compression method ${entry.compressionMethod} for ${entryName}.`);
+}
+
+function readZipEntryText(filePath, entryName) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    const stream = openZipEntryStream(filePath, entryName);
+    stream.on('data', (chunk) => chunks.push(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+  });
+}
+
+function getXlsxPartPath(basePart, target) {
+  const normalizedTarget = String(target || '').replace(/\\/g, '/');
+  if (normalizedTarget.startsWith('/')) return normalizedTarget.replace(/^\/+/, '');
+
+  const baseFolder = basePart.includes('/') ? basePart.slice(0, basePart.lastIndexOf('/')) : '';
+  const parts = `${baseFolder}/${normalizedTarget}`.split('/');
+  const resolved = [];
+  parts.forEach((part) => {
+    if (!part || part === '.') return;
+    if (part === '..') resolved.pop();
+    else resolved.push(part);
+  });
+  return resolved.join('/');
+}
+
+function parseWorkbookRelationships(relsXml) {
+  const rels = {};
+  const relationshipRegex = /<Relationship\b[^>]*>/g;
+  let match;
+  while ((match = relationshipRegex.exec(relsXml))) {
+    const xml = match[0];
+    const id = getXmlAttribute(xml, 'Id');
+    const target = getXmlAttribute(xml, 'Target');
+    if (id && target) rels[id] = target;
+  }
+  return rels;
+}
+
+function parseWorkbookSheets(workbookXml) {
+  const sheets = [];
+  const sheetRegex = /<sheet\b[^>]*>/g;
+  let match;
+  while ((match = sheetRegex.exec(workbookXml))) {
+    const xml = match[0];
+    sheets.push({
+      name: getXmlAttribute(xml, 'name'),
+      relationshipId: getXmlAttribute(xml, 'r:id')
+    });
+  }
+  return sheets;
+}
+
+function extractTextNodes(xml) {
+  const values = [];
+  const textRegex = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+  let match;
+  while ((match = textRegex.exec(xml))) {
+    values.push(xmlDecode(match[1]));
+  }
+  return values.join('');
+}
+
+async function readXlsxSharedStrings(filePath) {
+  if (!findZipEntry(filePath, 'xl/sharedStrings.xml')) return [];
+
+  const sharedStringsXml = await readZipEntryText(filePath, 'xl/sharedStrings.xml');
+  const sharedStrings = [];
+  const itemRegex = /<si\b[^>]*>([\s\S]*?)<\/si>/g;
+  let match;
+  while ((match = itemRegex.exec(sharedStringsXml))) {
+    sharedStrings.push(extractTextNodes(match[1]));
+  }
+  return sharedStrings;
+}
+
+function columnLettersToIndex(letters) {
+  let index = 0;
+  String(letters || '').toUpperCase().split('').forEach((letter) => {
+    index = index * 26 + letter.charCodeAt(0) - 64;
+  });
+  return index - 1;
+}
+
+function getCellColumnIndex(cellXml) {
+  const reference = getXmlAttribute(cellXml, 'r');
+  const columnMatch = /^([A-Z]+)/i.exec(reference);
+  return columnMatch ? columnLettersToIndex(columnMatch[1]) : -1;
+}
+
+function extractXlsxCellValue(cellXml, sharedStrings) {
+  const type = getXmlAttribute(cellXml, 't');
+
+  if (type === 'inlineStr') {
+    return extractTextNodes(cellXml);
+  }
+
+  const valueMatch = /<v\b[^>]*>([\s\S]*?)<\/v>/.exec(cellXml);
+  if (!valueMatch) return '';
+
+  const rawValue = xmlDecode(valueMatch[1]);
+  if (type === 's') return sharedStrings[Number(rawValue)] || '';
+  if (type === 'b') return rawValue === '1' ? 'TRUE' : 'FALSE';
+  return rawValue;
+}
+
+function parseXlsxRow(rowXml, sharedStrings) {
+  const row = [];
+  const cellRegex = /<c\b[^>]*>[\s\S]*?<\/c>|<c\b[^>]*\/>/g;
+  let match;
+  while ((match = cellRegex.exec(rowXml))) {
+    const columnIndex = getCellColumnIndex(match[0]);
+    if (columnIndex >= 0) {
+      row[columnIndex] = extractXlsxCellValue(match[0], sharedStrings);
+    }
+  }
+  return row;
+}
+
+function getHeaderName(headers, index) {
+  return String(headers[index] || '').trim();
+}
+
+function rowArrayToObject(headers, values) {
+  const row = {};
+  values.forEach((value, index) => {
+    const header = getHeaderName(headers, index);
+    if (header) row[header] = value ?? '';
+  });
+  return row;
+}
+
+async function parseLargeXlsxPpBaseWorkbook(filePath) {
+  const workbookXml = await readZipEntryText(filePath, 'xl/workbook.xml');
+  const relsXml = await readZipEntryText(filePath, 'xl/_rels/workbook.xml.rels');
+  const relationships = parseWorkbookRelationships(relsXml);
+  const sheets = parseWorkbookSheets(workbookXml);
+  const baseSheet = sheets.find((sheet) => sheet.name === 'Base') || sheets[0];
+
+  if (!baseSheet?.relationshipId || !relationships[baseSheet.relationshipId]) {
+    throw new Error(`No readable Base worksheet found in ${path.basename(filePath)}`);
+  }
+
+  const sheetEntryName = getXlsxPartPath('xl/workbook.xml', relationships[baseSheet.relationshipId]);
+  const sharedStrings = await readXlsxSharedStrings(filePath);
+  const rows = [];
+  let headers = null;
+  let buffer = '';
+  let rowIndex = 0;
+  const decoder = new StringDecoder('utf8');
+
+  await new Promise((resolve, reject) => {
+    const stream = openZipEntryStream(filePath, sheetEntryName);
+
+    stream.on('data', (chunk) => {
+      buffer += decoder.write(chunk);
+
+      let rowEnd = buffer.indexOf('</row>');
+      while (rowEnd >= 0) {
+        const rowStart = buffer.lastIndexOf('<row', rowEnd);
+        if (rowStart < 0) {
+          buffer = buffer.slice(rowEnd + 6);
+          rowEnd = buffer.indexOf('</row>');
+          continue;
+        }
+
+        const rowXml = buffer.slice(rowStart, rowEnd + 6);
+        buffer = buffer.slice(rowEnd + 6);
+        const values = parseXlsxRow(rowXml, sharedStrings);
+
+        if (!headers && values.some((value) => String(value || '').trim())) {
+          headers = values.map((value) => String(value || '').trim());
+        } else if (headers && values.some((value) => String(value || '').trim())) {
+          rows.push(normalizePpRow(rowArrayToObject(headers, values), rowIndex));
+          rowIndex += 1;
+        }
+
+        rowEnd = buffer.indexOf('</row>');
+      }
+
+      if (buffer.length > 1024 * 1024 * 4) {
+        buffer = buffer.slice(-1024 * 1024);
+      }
+    });
+
+    stream.on('error', reject);
+    stream.on('end', () => {
+      buffer += decoder.end();
+      resolve();
+    });
+  });
+
+  if (!headers) {
+    throw new Error(`Unable to find PP Base header row in ${path.basename(filePath)}`);
+  }
+
+  return { rows, sheetName: baseSheet.name };
+}
+
+async function parsePpWorkbook(filePath) {
   const workbook = XLSX.readFile(filePath, {
     dense: true,
     cellDates: false,
@@ -293,6 +721,9 @@ function parsePpWorkbook(filePath) {
   const worksheet = workbook.Sheets[sheetName];
 
   if (!worksheet) {
+    if (path.extname(filePath).toLowerCase() === '.xlsx' && workbook.SheetNames.includes('Base')) {
+      return parseLargeXlsxPpBaseWorkbook(filePath);
+    }
     throw new Error(`No worksheets found in ${path.basename(filePath)}`);
   }
 
@@ -307,7 +738,7 @@ function parsePpWorkbook(filePath) {
 
 function resolveRfsWorkbookPath() {
   const selectedWorkbookPath = loadSelectedRfsWorkbookPath();
-  if (selectedWorkbookPath && fs.existsSync(selectedWorkbookPath)) {
+  if (selectedWorkbookPath && (isSharePointUrl(selectedWorkbookPath) || fs.existsSync(selectedWorkbookPath))) {
     return selectedWorkbookPath;
   }
 
@@ -355,6 +786,7 @@ function parseRfsWorkbook(filePath, quarter = 'AMJ') {
       id: index + 1,
       l4Name: row['L4 NAME'] || '',
       projectStatus: row['Project Status'] || '',
+      year: row.Year || row['Fiscal Year'] || row.FY || row['RFS Year'] || getRfsYearFromConfig(quarterConfig),
       customerName: row['Customer Name'] || '',
       customerGroup: row['Customer Group'] || '',
       projectCode: row['Project Code'] || '',
@@ -421,6 +853,14 @@ function parseRfsWorkbook(filePath, quarter = 'AMJ') {
   };
 }
 
+function getRfsYearFromConfig(quarterConfig) {
+  const sourceText = `${quarterConfig?.sourceSheetName || ''} ${quarterConfig?.outputSheetName || ''}`;
+  const match = sourceText.match(/(?:FY)?'?(\d{2,4})\b/i);
+  if (!match) return '';
+  const year = match[1];
+  return year.length === 2 ? `20${year}` : year;
+}
+
 function normalizeHeader(value) {
   return String(value || '')
     .toLowerCase()
@@ -444,9 +884,9 @@ function getRowValue(rowObject, values, headerIndex, aliases, columnIndex) {
 }
 
 function parseFulfilmentWorkbook(filePath) {
-  const sheetName = 'Active SR';
-  const candidateSheetName = 'Candidate Tracker';
-  const fulfilmentDetailsSheetName = 'Fulfillment Details 2025&2026';
+  const sheetName = FULFILMENT_SOURCE_SHEET_NAME;
+  const candidateSheetName = FULFILMENT_CANDIDATE_SHEET_NAME;
+  const fulfilmentDetailsSheetName = FULFILMENT_DETAILS_SHEET_NAME;
   const workbook = XLSX.readFile(filePath, {
     dense: true,
     cellDates: false,
@@ -465,15 +905,15 @@ function parseFulfilmentWorkbook(filePath) {
     header: 1,
     defval: '',
     raw: false,
-    blankrows: false
+    blankrows: true
   });
   const headerRow = aoa.findIndex((row) => {
     const headers = row.map(normalizeHeader);
-    return headers.includes('customer') && headers.includes('status');
+    return headers.includes('jobrequisitionid') && headers.includes('legacyjobreqid') && headers.includes('status');
   });
 
   if (headerRow < 0) {
-    throw new Error(`Unable to find Active SR header row in ${path.basename(filePath)}`);
+    throw new Error(`Unable to find ${sheetName} header row in ${path.basename(filePath)}`);
   }
 
   const headers = aoa[headerRow].map((header) => String(header || '').trim());
@@ -486,54 +926,101 @@ function parseFulfilmentWorkbook(filePath) {
       return {
         id: index + 1,
         status: String(getRowValue(rowObject, values, headerIndex, ['Status'], 2) || '').trim(),
-        offshoreOnsite: String(getRowValue(rowObject, values, headerIndex, ['Offshore/Onsite', 'Offshore Onsite'], 12) || '').trim(),
-        customer: String(getRowValue(rowObject, values, headerIndex, ['Customer'], 0) || '').trim(),
-        legacyJobReqId: String(getRowValue(rowObject, values, headerIndex, ['Legacy Job Req Id', 'Legacy Job Req ID'], 5) || '').trim(),
-        demandId: String(getRowValue(rowObject, values, headerIndex, ['Job Requisition ID/Demand ID', 'Job Requisition ID', 'Demand ID'], 6) || '').trim(),
-        role: String(getRowValue(rowObject, values, headerIndex, ['Role'], 11) || '').trim(),
-        prioritywise: String(getRowValue(rowObject, values, headerIndex, ['Prioritywise', 'Priority'], 13) || '').trim(),
-        location: String(getRowValue(rowObject, values, headerIndex, ['Location'], 29) || '').trim(),
-        band: String(getRowValue(rowObject, values, headerIndex, ['Band'], 34) || '').trim(),
-        reqDate: String(getRowValue(rowObject, values, headerIndex, ['Req Date'], 26) || '').trim(),
+        offshoreOnsite: String(getRowValue(rowObject, values, headerIndex, ['Onshore/Offshore'], 31) || '').trim(),
+        customer: String(getRowValue(rowObject, values, headerIndex, ['Customer Name (AIS)', 'Customer'], 27) || '').trim(),
+        legacyJobReqId: String(getRowValue(rowObject, values, headerIndex, ['Legacy Job Req Id'], 1) || '').trim(),
+        demandId: String(getRowValue(rowObject, values, headerIndex, ['Job Requisition ID'], 0) || '').trim(),
+        stageStatus: String(getRowValue(rowObject, values, headerIndex, ['StageStatus', 'Stage Status'], -1) || '').trim(),
+        role: String(getRowValue(rowObject, values, headerIndex, ['Role Name (Demand Unit)'], 39) || '').trim(),
+        skillCluster: String(getRowValue(rowObject, values, headerIndex, ['Skill Cluster', 'SkillCluster', 'Demand Skill Cluster', 'Skill Cluster (Demand Unit)'], -1) || '').trim(),
+        projectL4: String(getRowValue(rowObject, values, headerIndex, ['Project L4'], 25) || '').trim(),
+        prioritywise: '',
+        location: String(getRowValue(rowObject, values, headerIndex, ['Personnel Sub Area Name'], 30) || '').trim(),
+        band: String(getRowValue(rowObject, values, headerIndex, ['Demand Sub Band Name'], 36) || '').trim(),
+        reqDate: String(getRowValue(rowObject, values, headerIndex, ['Date Created'], 14) || '').trim(),
+        closedDate: String(getRowValue(rowObject, values, headerIndex, ['Closed_Date', 'Closed Date'], -1) || '').trim(),
         demandMonth: toMonthLabel(
-          getRowValue(rowObject, values, headerIndex, ['Req Date'], 26) ||
-          getRowValue(rowObject, values, headerIndex, ['TRF Requested Date'], 27)
+          getRowValue(rowObject, values, headerIndex, ['Date Created'], 14)
         ),
-        totalPositions: toNumber(getRowValue(rowObject, values, headerIndex, ['Actionable Position', 'Total Positions'], 33)),
-        remainingPositions: toNumber(getRowValue(rowObject, values, headerIndex, ['Balance Positions', 'Remaining Positions'], 15)),
-        agingDays: toNumber(getRowValue(rowObject, values, headerIndex, ['Aging', 'Aging in Days'], 14)),
-        profilesReceived: toNumber(getRowValue(rowObject, values, headerIndex, ['Profiles Received', '# Profiles Received'], 17)),
-        tp1Selected: toNumber(getRowValue(rowObject, values, headerIndex, ['TP-1 Selected', '# TP-1 Selected'], 18)),
-        tp2ClientSelected: toNumber(getRowValue(rowObject, values, headerIndex, ['TP-2/Client Selected', '# TP-2/Client Selected'], 20)),
-        tp3ClientSelected: toNumber(getRowValue(rowObject, values, headerIndex, ['TP-3/Client Selected', '# TP-3/Client Selected'], 21)),
-        onboarded: toNumber(getRowValue(rowObject, values, headerIndex, ['Onboarded', '# Onboarded'], 23)),
-        renege: toNumber(getRowValue(rowObject, values, headerIndex, ['Renege', '# Renege'], 24)),
-        pm: String(getRowValue(rowObject, values, headerIndex, ['PM'], 1) || '').trim(),
-        billingLoss: String(getRowValue(rowObject, values, headerIndex, ['Billing Loss'], 41) || '').trim(),
-        cuMapping: String(getRowValue(rowObject, values, headerIndex, ['CU Mapping'], 43) || '').trim()
+        numberOfOpenings: toNumber(getRowValue(rowObject, values, headerIndex, ['Number of Openings'], -1)),
+        totalPositions: toNumber(getRowValue(rowObject, values, headerIndex, ['Number of Openings'], -1)),
+        remainingPositions: toNumber(getRowValue(rowObject, values, headerIndex, ['Actionable Position'], 63)),
+        agingDays: toNumber(getRowValue(rowObject, values, headerIndex, ['Demand_Ageing_days'], 68)),
+        profilesReceived: toNumber(getRowValue(rowObject, values, headerIndex, ['Profiles Received'], 75)),
+        tp1Selected: toNumber(getRowValue(rowObject, values, headerIndex, ['TP-1 Selected'], 76)),
+        tp2ClientSelected: toNumber(getRowValue(rowObject, values, headerIndex, ['TP-2/Client Selected'], 78)),
+        tp3ClientSelected: toNumber(getRowValue(rowObject, values, headerIndex, ['TP-3/Client Selected'], 79)),
+        onboarded: toNumber(getRowValue(rowObject, values, headerIndex, ['Onboarded'], 80)),
+        renege: toNumber(getRowValue(rowObject, values, headerIndex, ['Renege'], 81)),
+        pm: String(getRowValue(rowObject, values, headerIndex, ['Hiring Manager'], 3) || '').trim(),
+        billingLoss: String(getRowValue(rowObject, values, headerIndex, ['Billing Loss flag'], 87) || '').trim(),
+        billingLossValue: getRowValue(rowObject, values, headerIndex, ['Billing Loss'], 74) ?? '',
+        cuMapping: String(getRowValue(rowObject, values, headerIndex, ['HR L4'], 13) || '').trim()
       };
     });
 
   const candidateRows = parseCandidateTrackerSheet(workbook.Sheets[candidateSheetName]);
-  const fulfilmentDetailRows = parseFulfilmentDetailsSheet(workbook.Sheets[fulfilmentDetailsSheetName]);
+  const fulfilmentDetailRows = enrichFulfilmentDetails(
+    parseFulfilmentDetailsSheet(workbook.Sheets[fulfilmentDetailsSheetName]),
+    rows
+  );
 
   return { rows, sheetName, candidateRows, candidateSheetName, fulfilmentDetailRows, fulfilmentDetailsSheetName };
 }
 
-function parseStageClassificationWorkbook(filePath = STAGE_CLASSIFICATION_PATH) {
+function enrichFulfilmentDetails(fulfilmentRows, demandRows) {
+  const demandByLegacyId = new Map();
+  const demandByDemandId = new Map();
+
+  demandRows.forEach((row) => {
+    if (row.legacyJobReqId) demandByLegacyId.set(String(row.legacyJobReqId).trim(), row);
+    if (row.demandId) demandByDemandId.set(String(row.demandId).trim(), row);
+  });
+
+  return fulfilmentRows.map((row) => {
+    const demand = demandByLegacyId.get(String(row.sr || '').trim()) ||
+      demandByDemandId.get(String(row.jobRequisitionId || '').trim()) ||
+      {};
+
+    return {
+      ...row,
+      customer: row.customer || demand.customer || '',
+      projectL4: demand.projectL4 || '',
+      hiringManager: demand.pm || '',
+      cuMapping: demand.cuMapping || '',
+      demandStatus: demand.status || '',
+      demandId: demand.demandId || row.jobRequisitionId || '',
+      legacyJobReqId: demand.legacyJobReqId || row.sr || ''
+    };
+  });
+}
+
+function parseStageClassificationWorkbook(filePath = resolveStageClassificationWorkbookPath()) {
   const emptyClassification = {
     sourceFileName: path.basename(filePath),
     filePath,
+    cachedFilePath: '',
     sheetName: 'Resourcing',
     groups: [],
-    stages: []
+    stages: [],
+    warning: ''
   };
 
   if (!filePath || !fs.existsSync(filePath)) {
     return emptyClassification;
   }
 
-  const workbook = XLSX.readFile(filePath, {
+  let preparedWorkbook;
+  try {
+    preparedWorkbook = prepareWorkbookForRead(filePath, 'stage-classification');
+  } catch (error) {
+    return {
+      ...emptyClassification,
+      warning: error.message || getWorkbookReadErrorMessage(filePath, error)
+    };
+  }
+
+  const workbook = XLSX.readFile(preparedWorkbook.cachedPath, {
     cellDates: false,
     bookDeps: false,
     bookVBA: false,
@@ -586,9 +1073,11 @@ function parseStageClassificationWorkbook(filePath = STAGE_CLASSIFICATION_PATH) 
   return {
     sourceFileName: path.basename(filePath),
     filePath,
+    cachedFilePath: preparedWorkbook.cachedPath,
     sheetName,
     groups,
-    stages
+    stages,
+    warning: ''
   };
 }
 
@@ -642,9 +1131,10 @@ function parseFulfilmentDetailsSheet(worksheet) {
         customer: String(getRowValue(rowObject, values, headerIndex, ['Customer'], 6) || '').trim(),
         sr: String(getRowValue(rowObject, values, headerIndex, ['SR#', 'SR'], 7) || '').trim(),
         psa: String(getRowValue(rowObject, values, headerIndex, ['PSA'], 8) || '').trim(),
-        count: toNumber(getRowValue(rowObject, values, headerIndex, ['Count'], 9)),
+        count: toNumber(getRowValue(rowObject, values, headerIndex, ['Count'], -1)) || 1,
         dm: String(getRowValue(rowObject, values, headerIndex, ['DM'], 10) || '').trim(),
         comments: String(getRowValue(rowObject, values, headerIndex, ['Comments'], 11) || '').trim(),
+        jobRequisitionId: String(getRowValue(rowObject, values, headerIndex, ['Job Requisition ID'], 11) || '').trim(),
         laptopCollectedLocation: String(getRowValue(rowObject, values, headerIndex, ['Laptop Collected Location'], 12) || '').trim()
       };
     });
@@ -682,6 +1172,7 @@ function parseCandidateTrackerSheet(worksheet) {
         candidateStatus: String(getRowValue(rowObject, values, headerIndex, ['Status'], 4) || '').trim(),
         sharedBy: String(getRowValue(rowObject, values, headerIndex, ['Shared_by', 'Shared By', 'Profile Shared By'], 5) || '').trim(),
         candidateName: String(getRowValue(rowObject, values, headerIndex, ['Candidate Name'], 8) || '').trim(),
+        stageStatus: String(getRowValue(rowObject, values, headerIndex, ['StageStatus', 'Stage Status'], 9) || '').trim(),
         talentNavigatorScore: String(getRowValue(rowObject, values, headerIndex, ['Talent Navigator Score %', 'Talent Navigator Score'], 9) || '').trim(),
         externalInternal: String(getRowValue(rowObject, values, headerIndex, ['External/Internal'], 6) || '').trim(),
         sapId: String(getRowValue(rowObject, values, headerIndex, ['SAP ID'], 7) || '').trim(),
@@ -707,11 +1198,188 @@ function parseCandidateTrackerSheet(worksheet) {
     });
 }
 
+function parseHeaderedSheet(worksheet, requiredHeaders = []) {
+  if (!worksheet) return { rows: [], sheetName: '' };
+
+  const aoa = XLSX.utils.sheet_to_json(worksheet, {
+    header: 1,
+    defval: '',
+    raw: false,
+    blankrows: true
+  });
+  const normalizedRequired = requiredHeaders.map(normalizeHeader);
+  const headerRow = aoa.findIndex((row) => {
+    const headers = row.map(normalizeHeader);
+    return normalizedRequired.every((header) => headers.includes(header));
+  });
+
+  if (headerRow < 0) {
+    return { rows: [], headers: [], headerIndex: new Map() };
+  }
+
+  const headers = aoa[headerRow].map((header) => String(header || '').trim());
+  const headerIndex = new Map(headers.map((header, index) => [normalizeHeader(header), index]));
+  const rows = aoa.slice(headerRow + 1).filter((values) => values.some((value) => String(value || '').trim()));
+  return { rows, headers, headerIndex };
+}
+
+function getSheetValue(values, headerIndex, aliases) {
+  for (const alias of aliases) {
+    const index = headerIndex.get(normalizeHeader(alias));
+    if (index !== undefined) return values[index] ?? '';
+  }
+  return '';
+}
+
+function toText(value) {
+  return String(value ?? '').trim();
+}
+
+function buildCandidateName(values, headerIndex) {
+  const explicitName = toText(getSheetValue(values, headerIndex, ['Candidate Name']));
+  if (explicitName) return explicitName;
+  return [
+    getSheetValue(values, headerIndex, ['First Name (Application)']),
+    getSheetValue(values, headerIndex, ['Middle Name']),
+    getSheetValue(values, headerIndex, ['Last Name'])
+  ].map(toText).filter(Boolean).join(' ');
+}
+
+function normalizeTagDemandRows(worksheet) {
+  const parsed = parseHeaderedSheet(worksheet, ['Job Requisition ID', 'Legacy Job Req Id', 'LOB', 'Project L1']);
+  return parsed.rows.map((values, index) => {
+    const jobRequisitionId = toText(getSheetValue(values, parsed.headerIndex, ['Job Requisition ID']));
+    const legacyJobReqId = toText(getSheetValue(values, parsed.headerIndex, ['Legacy Job Req Id']));
+    return {
+      id: `demand-${index + 1}`,
+      jobRequisitionId,
+      legacyJobReqId,
+      demandKey: legacyJobReqId || jobRequisitionId || `demand-${index + 1}`,
+      status: toText(getSheetValue(values, parsed.headerIndex, ['Status'])),
+      lob: toText(getSheetValue(values, parsed.headerIndex, ['LOB'])),
+      projectL1: toText(getSheetValue(values, parsed.headerIndex, ['Project L1'])),
+      projectL4: toText(getSheetValue(values, parsed.headerIndex, ['Project L4'])),
+      customer: toText(getSheetValue(values, parsed.headerIndex, ['Customer Name (AIS)', 'Customer'])),
+      hiringManager: toText(getSheetValue(values, parsed.headerIndex, ['Hiring Manager'])),
+      recruiter: toText(getSheetValue(values, parsed.headerIndex, ['Recruiter', 'Recuriter Code'])),
+      geoTagLead: toText(getSheetValue(values, parsed.headerIndex, ['Geo Tag Lead'])),
+      dateCreated: toText(getSheetValue(values, parsed.headerIndex, ['Date Created', 'Date  Created'])),
+      tagAssignedDate: toText(getSheetValue(values, parsed.headerIndex, ['Tag Assigned Date', 'Tag assigned date'])),
+      role: toText(getSheetValue(values, parsed.headerIndex, ['Role Name (Demand Unit)'])),
+      skillCluster: toText(getSheetValue(values, parsed.headerIndex, ['Final Skill Cluster', 'Skill Classification Name'])),
+      geo: toText(getSheetValue(values, parsed.headerIndex, ['GEO', 'Geo'])),
+      offOn: toText(getSheetValue(values, parsed.headerIndex, ['Off/On', 'Onshore/Offshore', 'OFF/ON'])),
+      hiringType: toText(getSheetValue(values, parsed.headerIndex, ['Hiring Type', 'Type Of Hires'])),
+      demandCategorization: toText(getSheetValue(values, parsed.headerIndex, ['Demand Categorization'])),
+      numberOfOpenings: toNumber(getSheetValue(values, parsed.headerIndex, ['Number of Openings'])),
+      balancePositions: toNumber(getSheetValue(values, parsed.headerIndex, ['Balance Positions'])),
+      actionablePositions: toNumber(getSheetValue(values, parsed.headerIndex, ['Actionable Position'])),
+      offered: toNumber(getSheetValue(values, parsed.headerIndex, ['Offered'])),
+      externalFulfilled: toNumber(getSheetValue(values, parsed.headerIndex, ['External Fulfilled'])),
+      internalFulfilled: toNumber(getSheetValue(values, parsed.headerIndex, ['Internal Fulfilled'])),
+      demandAgeingDays: toNumber(getSheetValue(values, parsed.headerIndex, ['Demand Ageing (days)', 'Demand_Ageing_days']))
+    };
+  });
+}
+
+function normalizeTagCandidateRows(worksheet, sheetName = 'Early Pipeline') {
+  const parsed = parseHeaderedSheet(worksheet, ['Job Requisition ID', 'Legacy Job Req Id', 'LOB', 'Project L1']);
+  return parsed.rows.map((values, index) => {
+    const jobRequisitionId = toText(getSheetValue(values, parsed.headerIndex, ['Job Requisition ID']));
+    const legacyJobReqId = toText(getSheetValue(values, parsed.headerIndex, ['Legacy Job Req Id']));
+    return {
+      id: `${safeFileName(sheetName)}-${index + 1}`,
+      sourceSheet: sheetName,
+      jobRequisitionId,
+      legacyJobReqId,
+      demandKey: legacyJobReqId || jobRequisitionId || `${safeFileName(sheetName)}-${index + 1}`,
+      applicationId: toText(getSheetValue(values, parsed.headerIndex, ['Application ID'])),
+      candidateId: toText(getSheetValue(values, parsed.headerIndex, ['Candidate ID'])),
+      candidateName: buildCandidateName(values, parsed.headerIndex),
+      applicationStatus: toText(getSheetValue(values, parsed.headerIndex, ['Application Status', 'Current Application Status', 'Status', 'New status', 'Joiner Stage'])),
+      currentApplicationStatus: toText(getSheetValue(values, parsed.headerIndex, ['Current Application Status'])),
+      source: toText(getSheetValue(values, parsed.headerIndex, ['source_details', 'source_custom', 'source', 'Source'])),
+      sourceCategory: toText(getSheetValue(values, parsed.headerIndex, ['Source'])),
+      recruiter: toText(getSheetValue(values, parsed.headerIndex, ['Recruiter', 'Recruiter User ID', 'Recruiter code'])),
+      recruiterCode: toText(getSheetValue(values, parsed.headerIndex, ['Recruiter code', 'Recruiter User ID'])),
+      tagLeadName: toText(getSheetValue(values, parsed.headerIndex, ['TAG Lead Name'])),
+      customer: toText(getSheetValue(values, parsed.headerIndex, ['Customer'])),
+      projectName: toText(getSheetValue(values, parsed.headerIndex, ['Project Name'])),
+      projectCode: toText(getSheetValue(values, parsed.headerIndex, ['Project Code', 'Project code'])),
+      lob: toText(getSheetValue(values, parsed.headerIndex, ['LOB'])),
+      projectL1: toText(getSheetValue(values, parsed.headerIndex, ['Project L1'])),
+      projectL4: toText(getSheetValue(values, parsed.headerIndex, ['Project L4'])),
+      geo: toText(getSheetValue(values, parsed.headerIndex, ['GEO', 'Geo Location/Country', 'Country'])),
+      offOn: toText(getSheetValue(values, parsed.headerIndex, ['OFF/ON', 'Off/On'])),
+      hiringType: toText(getSheetValue(values, parsed.headerIndex, ['Hiring Type', 'Type of Hires'])),
+      demandCategorization: toText(getSheetValue(values, parsed.headerIndex, ['Demand Categorization'])),
+      role: toText(getSheetValue(values, parsed.headerIndex, ['Role Name (Demand Unit)'])),
+      band: toText(getSheetValue(values, parsed.headerIndex, ['Band(Employee Sub group/Employment Type)', 'Employment Type Name'])),
+      subBand: toText(getSheetValue(values, parsed.headerIndex, ['Sub Band'])),
+      offerDate: toText(getSheetValue(values, parsed.headerIndex, ['Offer Date', 'Offer-Approved', 'Offer-Sent'])),
+      joiningDate: toText(getSheetValue(values, parsed.headerIndex, ['Joining Date', 'Joined Date'])),
+      hireDate: toText(getSheetValue(values, parsed.headerIndex, ['Hire Date', 'Hire  Date', 'Hired-On'])),
+      tp1PanelName: toText(getSheetValue(values, parsed.headerIndex, ['TP1 Panel Name'])),
+      tp1InterviewDate: toText(getSheetValue(values, parsed.headerIndex, ['TP1 Interview date'])),
+      tp2PanelName: toText(getSheetValue(values, parsed.headerIndex, ['TP2 Panel Name'])),
+      tp2InterviewDate: toText(getSheetValue(values, parsed.headerIndex, ['TP2 Interview date']))
+    };
+  });
+}
+
+function parseTagWorkbook(filePath) {
+  const sheetNames = [
+    'Demand data',
+    'Early Pipeline',
+    'MTD Offered',
+    'MTD Renege',
+    'MTD Declined',
+    'Yet to Joiner',
+    'Past Joiner',
+    'Rejected'
+  ];
+  const workbook = XLSX.readFile(filePath, {
+    dense: true,
+    cellDates: false,
+    sheets: sheetNames,
+    bookDeps: false,
+    bookVBA: false,
+    bookFiles: false
+  });
+
+  const demandRows = normalizeTagDemandRows(workbook.Sheets['Demand data']);
+  const earlyPipelineRows = normalizeTagCandidateRows(workbook.Sheets['Early Pipeline'], 'Early Pipeline');
+  const outcomeRows = {
+    offered: normalizeTagCandidateRows(workbook.Sheets['MTD Offered'], 'MTD Offered'),
+    renege: normalizeTagCandidateRows(workbook.Sheets['MTD Renege'], 'MTD Renege'),
+    declined: normalizeTagCandidateRows(workbook.Sheets['MTD Declined'], 'MTD Declined'),
+    yetToJoin: normalizeTagCandidateRows(workbook.Sheets['Yet to Joiner'], 'Yet to Joiner'),
+    pastJoiner: normalizeTagCandidateRows(workbook.Sheets['Past Joiner'], 'Past Joiner'),
+    rejected: normalizeTagCandidateRows(workbook.Sheets.Rejected, 'Rejected')
+  };
+
+  return {
+    demandSheetName: 'Demand data',
+    earlyPipelineSheetName: 'Early Pipeline',
+    outcomeSheetNames: {
+      offered: 'MTD Offered',
+      renege: 'MTD Renege',
+      declined: 'MTD Declined',
+      yetToJoin: 'Yet to Joiner',
+      pastJoiner: 'Past Joiner',
+      rejected: 'Rejected'
+    },
+    demandRows,
+    earlyPipelineRows,
+    outcomeRows
+  };
+}
+
 async function getResourceData() {
   const workbookPath = resolveWorkbookPath();
   const dataFolder = path.dirname(workbookPath);
 
-  if (!fs.existsSync(workbookPath)) {
+  if (!isSharePointUrl(workbookPath) && !fs.existsSync(workbookPath)) {
     return {
       rows: [],
       fileName: RESOURCE_WORKBOOK_NAME,
@@ -723,11 +1391,27 @@ async function getResourceData() {
     };
   }
 
-  const { rows, sheetName } = parseWorkbook(workbookPath);
+  let preparedWorkbook;
+  try {
+    preparedWorkbook = prepareWorkbookForRead(workbookPath, 'resource');
+  } catch (error) {
+    return {
+      rows: [],
+      fileName: path.basename(workbookPath),
+      filePath: workbookPath,
+      dataFolder,
+      sheetName: null,
+      refreshedAt: new Date().toISOString(),
+      warning: error.message || getWorkbookReadErrorMessage(workbookPath, error)
+    };
+  }
+
+  const { rows, sheetName } = parseWorkbook(preparedWorkbook.cachedPath);
   return {
     rows,
-    fileName: path.basename(workbookPath),
+    fileName: preparedWorkbook.fileName,
     filePath: workbookPath,
+    cachedFilePath: preparedWorkbook.cachedPath,
     dataFolder,
     sheetName,
     refreshedAt: new Date().toISOString()
@@ -754,7 +1438,7 @@ async function selectExcelFile(event) {
 
 function resolvePpWorkbookPath() {
   const selectedWorkbookPath = loadSelectedPpWorkbookPath();
-  if (selectedWorkbookPath && fs.existsSync(selectedWorkbookPath)) {
+  if (selectedWorkbookPath && (isSharePointUrl(selectedWorkbookPath) || fs.existsSync(selectedWorkbookPath))) {
     return selectedWorkbookPath;
   }
 
@@ -764,7 +1448,7 @@ function resolvePpWorkbookPath() {
 async function getPpData() {
   const workbookPath = resolvePpWorkbookPath();
 
-  if (!fs.existsSync(workbookPath)) {
+  if (!isSharePointUrl(workbookPath) && !fs.existsSync(workbookPath)) {
     return {
       rows: [],
       fileName: path.basename(PP_WORKBOOK_PATH),
@@ -775,11 +1459,26 @@ async function getPpData() {
     };
   }
 
-  const { rows, sheetName } = parsePpWorkbook(workbookPath);
+  let preparedWorkbook;
+  try {
+    preparedWorkbook = prepareWorkbookForRead(workbookPath, 'pp');
+  } catch (error) {
+    return {
+      rows: [],
+      fileName: path.basename(workbookPath),
+      filePath: workbookPath,
+      sheetName: null,
+      refreshedAt: new Date().toISOString(),
+      warning: error.message || getWorkbookReadErrorMessage(workbookPath, error)
+    };
+  }
+
+  const { rows, sheetName } = await parsePpWorkbook(preparedWorkbook.cachedPath);
   return {
     rows,
-    fileName: path.basename(workbookPath),
+    fileName: preparedWorkbook.fileName,
     filePath: workbookPath,
+    cachedFilePath: preparedWorkbook.cachedPath,
     sheetName,
     refreshedAt: new Date().toISOString()
   };
@@ -807,7 +1506,7 @@ async function getRfsData(event, options = {}) {
   const quarterConfig = getRfsQuarterConfig(options.quarter);
   const workbookPath = resolveRfsWorkbookPath();
 
-  if (!fs.existsSync(workbookPath)) {
+  if (!isSharePointUrl(workbookPath) && !fs.existsSync(workbookPath)) {
     return {
       summaryRows: [],
       detailRows: [],
@@ -825,11 +1524,33 @@ async function getRfsData(event, options = {}) {
     };
   }
 
-  const parsed = parseRfsWorkbook(workbookPath, quarterConfig.quarter);
+  let preparedWorkbook;
+  try {
+    preparedWorkbook = prepareWorkbookForRead(workbookPath, 'rfs');
+  } catch (error) {
+    return {
+      summaryRows: [],
+      detailRows: [],
+      promptRows: [],
+      grandTotal: null,
+      quarter: quarterConfig.quarter,
+      months: quarterConfig.months,
+      fileName: path.basename(workbookPath),
+      filePath: workbookPath,
+      sourceSheetName: null,
+      outputSheetName: quarterConfig.outputSheetName,
+      promptSheetName: 'RFS Summary Prompt',
+      refreshedAt: new Date().toISOString(),
+      warning: error.message || getWorkbookReadErrorMessage(workbookPath, error)
+    };
+  }
+
+  const parsed = parseRfsWorkbook(preparedWorkbook.cachedPath, quarterConfig.quarter);
   return {
     ...parsed,
-    fileName: path.basename(workbookPath),
+    fileName: preparedWorkbook.fileName,
     filePath: workbookPath,
+    cachedFilePath: preparedWorkbook.cachedPath,
     refreshedAt: new Date().toISOString()
   };
 }
@@ -854,7 +1575,7 @@ async function selectRfsExcelFile(event, options = {}) {
 
 function resolveFulfilmentWorkbookPath() {
   const selectedWorkbookPath = loadSelectedFulfilmentWorkbookPath();
-  if (selectedWorkbookPath && fs.existsSync(selectedWorkbookPath)) {
+  if (selectedWorkbookPath && (isSharePointUrl(selectedWorkbookPath) || fs.existsSync(selectedWorkbookPath))) {
     return selectedWorkbookPath;
   }
 
@@ -865,7 +1586,7 @@ async function getFulfilmentData() {
   const workbookPath = resolveFulfilmentWorkbookPath();
   const stageClassification = parseStageClassificationWorkbook();
 
-  if (!workbookPath || !fs.existsSync(workbookPath)) {
+  if (!workbookPath || (!isSharePointUrl(workbookPath) && !fs.existsSync(workbookPath))) {
     return {
       activeDemandRows: [],
       candidateRows: [],
@@ -873,22 +1594,42 @@ async function getFulfilmentData() {
       stageClassification,
       fileName: path.basename(FULFILMENT_WORKBOOK_PATH),
       filePath: workbookPath || '',
-      sheetName: 'Active SR',
-      candidateSheetName: 'Candidate Tracker',
-      fulfilmentDetailsSheetName: 'Fulfillment Details 2025&2026',
+      sheetName: FULFILMENT_SOURCE_SHEET_NAME,
+      candidateSheetName: FULFILMENT_CANDIDATE_SHEET_NAME,
+      fulfilmentDetailsSheetName: FULFILMENT_DETAILS_SHEET_NAME,
       refreshedAt: new Date().toISOString(),
       warning: `Fulfilment input workbook not found: ${workbookPath || FULFILMENT_WORKBOOK_PATH}`
     };
   }
 
-  const { rows, sheetName, candidateRows, candidateSheetName, fulfilmentDetailRows, fulfilmentDetailsSheetName } = parseFulfilmentWorkbook(workbookPath);
+  let preparedWorkbook;
+  try {
+    preparedWorkbook = prepareWorkbookForRead(workbookPath, 'fulfilment');
+  } catch (error) {
+    return {
+      activeDemandRows: [],
+      candidateRows: [],
+      fulfilmentDetailRows: [],
+      stageClassification,
+      fileName: path.basename(workbookPath),
+      filePath: workbookPath,
+      sheetName: FULFILMENT_SOURCE_SHEET_NAME,
+      candidateSheetName: FULFILMENT_CANDIDATE_SHEET_NAME,
+      fulfilmentDetailsSheetName: FULFILMENT_DETAILS_SHEET_NAME,
+      refreshedAt: new Date().toISOString(),
+      warning: error.message || getWorkbookReadErrorMessage(workbookPath, error)
+    };
+  }
+
+  const { rows, sheetName, candidateRows, candidateSheetName, fulfilmentDetailRows, fulfilmentDetailsSheetName } = parseFulfilmentWorkbook(preparedWorkbook.cachedPath);
   return {
     activeDemandRows: rows,
     candidateRows,
     fulfilmentDetailRows,
     stageClassification,
-    fileName: path.basename(workbookPath),
+    fileName: preparedWorkbook.fileName,
     filePath: workbookPath,
+    cachedFilePath: preparedWorkbook.cachedPath,
     sheetName,
     candidateSheetName,
     fulfilmentDetailsSheetName,
@@ -912,6 +1653,91 @@ async function selectFulfilmentExcelFile(event) {
 
   saveSelectedFulfilmentWorkbookPath(result.filePaths[0]);
   return getFulfilmentData();
+}
+
+function resolveTagWorkbookPath() {
+  const selectedWorkbookPath = loadSelectedTagWorkbookPath();
+  if (selectedWorkbookPath && (isSharePointUrl(selectedWorkbookPath) || fs.existsSync(selectedWorkbookPath))) {
+    return selectedWorkbookPath;
+  }
+
+  return TAG_WORKBOOK_PATH;
+}
+
+async function getTagData() {
+  const workbookPath = resolveTagWorkbookPath();
+
+  if (!workbookPath || (!isSharePointUrl(workbookPath) && !fs.existsSync(workbookPath))) {
+    return {
+      demandRows: [],
+      earlyPipelineRows: [],
+      outcomeRows: {
+        offered: [],
+        renege: [],
+        declined: [],
+        yetToJoin: [],
+        pastJoiner: [],
+        rejected: []
+      },
+      fileName: path.basename(TAG_WORKBOOK_PATH),
+      filePath: workbookPath || '',
+      demandSheetName: 'Demand data',
+      earlyPipelineSheetName: 'Early Pipeline',
+      refreshedAt: new Date().toISOString(),
+      warning: `TAG input workbook not found: ${workbookPath || TAG_WORKBOOK_PATH}`
+    };
+  }
+
+  let preparedWorkbook;
+  try {
+    preparedWorkbook = prepareWorkbookForRead(workbookPath, 'tag');
+  } catch (error) {
+    return {
+      demandRows: [],
+      earlyPipelineRows: [],
+      outcomeRows: {
+        offered: [],
+        renege: [],
+        declined: [],
+        yetToJoin: [],
+        pastJoiner: [],
+        rejected: []
+      },
+      fileName: path.basename(workbookPath),
+      filePath: workbookPath,
+      demandSheetName: 'Demand data',
+      earlyPipelineSheetName: 'Early Pipeline',
+      refreshedAt: new Date().toISOString(),
+      warning: error.message || getWorkbookReadErrorMessage(workbookPath, error)
+    };
+  }
+
+  const parsed = parseTagWorkbook(preparedWorkbook.cachedPath);
+  return {
+    ...parsed,
+    fileName: preparedWorkbook.fileName,
+    filePath: workbookPath,
+    cachedFilePath: preparedWorkbook.cachedPath,
+    refreshedAt: new Date().toISOString()
+  };
+}
+
+async function selectTagExcelFile(event) {
+  const browserWindow = BrowserWindow.fromWebContents(event.sender);
+  const result = await dialog.showOpenDialog(browserWindow, {
+    title: 'Choose TAG demand and supply workbook',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Excel Workbooks', extensions: ['xlsb', 'xlsx', 'xls', 'xlsm'] }
+    ]
+  });
+
+  if (result.canceled || !result.filePaths.length) {
+    return { canceled: true };
+  }
+
+  saveSelectedTagWorkbookPath(result.filePaths[0]);
+  return getTagData();
 }
 
 async function exportFulfilmentSnapshot(event, payload) {
@@ -939,10 +1765,50 @@ async function exportFulfilmentSnapshot(event, payload) {
   return { canceled: false, filePath: result.filePath };
 }
 
+function encodeMimeHeader(value) {
+  return `=?UTF-8?B?${Buffer.from(String(value || ''), 'utf8').toString('base64')}?=`;
+}
+
+function chunkBase64(value) {
+  return String(value || '').match(/.{1,76}/g)?.join('\r\n') || '';
+}
+
+async function draftHtmlEmail(_event, payload = {}) {
+  const subject = String(payload.subject || 'Candidate Stage Status').trim() || 'Candidate Stage Status';
+  const htmlBody = String(payload.htmlBody || '').trim();
+  if (!htmlBody) {
+    throw new Error('Email body is empty.');
+  }
+
+  const draftDir = path.join(app.getPath('temp'), 'ras-email-drafts');
+  fs.mkdirSync(draftDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+  const draftPath = path.join(draftDir, `${stamp}_${safeFileName(subject)}.eml`);
+  const eml = [
+    'X-Unsent: 1',
+    `Date: ${new Date().toUTCString()}`,
+    `Subject: ${encodeMimeHeader(subject)}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    chunkBase64(Buffer.from(htmlBody, 'utf8').toString('base64')),
+    ''
+  ].join('\r\n');
+
+  fs.writeFileSync(draftPath, eml, 'utf8');
+  const openError = await shell.openPath(draftPath);
+  if (openError) {
+    throw new Error(openError);
+  }
+
+  return { canceled: false, filePath: draftPath };
+}
+
 async function exportRfsSummary(event, payload) {
   const browserWindow = BrowserWindow.fromWebContents(event.sender);
   const result = await dialog.showSaveDialog(browserWindow, {
-    title: 'Save RFS summary',
+    title: 'Save RFS workbook',
     defaultPath: `${payload.outputSheetName || 'RFS Summary AMJ26'}.xlsx`,
     filters: [
       { name: 'Excel Workbook', extensions: ['xlsx'] }
@@ -956,6 +1822,10 @@ async function exportRfsSummary(event, payload) {
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.json_to_sheet(payload.rows || []);
   XLSX.utils.book_append_sheet(workbook, worksheet, (payload.outputSheetName || 'RFS Summary AMJ26').slice(0, 31));
+  if (Array.isArray(payload.detailRows) && payload.detailRows.length) {
+    const detailWorksheet = XLSX.utils.json_to_sheet(payload.detailRows);
+    XLSX.utils.book_append_sheet(workbook, detailWorksheet, 'Active Source Detail');
+  }
   XLSX.writeFile(workbook, result.filePath);
 
   return { canceled: false, filePath: result.filePath };
@@ -1047,6 +1917,9 @@ app.whenReady().then(() => {
   ipcMain.handle(FULFILMENT_CHANNEL, getFulfilmentData);
   ipcMain.handle(SELECT_FULFILMENT_CHANNEL, selectFulfilmentExcelFile);
   ipcMain.handle(EXPORT_FULFILMENT_CHANNEL, exportFulfilmentSnapshot);
+  ipcMain.handle(TAG_CHANNEL, getTagData);
+  ipcMain.handle(SELECT_TAG_CHANNEL, selectTagExcelFile);
+  ipcMain.handle(DRAFT_HTML_EMAIL_CHANNEL, draftHtmlEmail);
   ipcMain.handle(COMMENTS_CHANNEL, getCommentsData);
   ipcMain.handle(SAVE_RESOURCE_COMMENT_CHANNEL, (_event, payload) => saveComment('resource', payload));
   ipcMain.handle(SAVE_PP_COMMENT_CHANNEL, (_event, payload) => saveComment('pp', payload));

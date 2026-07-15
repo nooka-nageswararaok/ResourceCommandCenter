@@ -21,7 +21,13 @@ contextBridge.exposeInMainWorld('rfsBridge', {
 contextBridge.exposeInMainWorld('fulfilmentBridge', {
   getFulfilmentData: () => ipcRenderer.invoke('fulfilment:getData'),
   selectFulfilmentExcelFile: () => ipcRenderer.invoke('fulfilment:selectExcel'),
-  exportFulfilmentSnapshot: (payload) => ipcRenderer.invoke('fulfilment:exportSnapshot', payload)
+  exportFulfilmentSnapshot: (payload) => ipcRenderer.invoke('fulfilment:exportSnapshot', payload),
+  draftHtmlEmail: (payload) => ipcRenderer.invoke('email:draftHtml', payload)
+});
+
+contextBridge.exposeInMainWorld('tagBridge', {
+  getTagData: () => ipcRenderer.invoke('tag:getData'),
+  selectTagExcelFile: () => ipcRenderer.invoke('tag:selectExcel')
 });
 
 contextBridge.exposeInMainWorld('commentsBridge', {
