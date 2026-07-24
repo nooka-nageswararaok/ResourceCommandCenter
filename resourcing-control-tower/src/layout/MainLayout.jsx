@@ -1,3 +1,7 @@
+import packageJson from '../../package.json';
+
+const appVersion = packageJson.version || '1.0.0';
+
 export default function MainLayout({
   modules,
   activeRouteKey,
@@ -56,6 +60,11 @@ export default function MainLayout({
             </div>
           );
         })}
+
+        <div className="nav-version" title={`App version ${appVersion}`}>
+          <span>Version {appVersion}</span>
+          <b>v{appVersion}</b>
+        </div>
       </nav>
 
       <section className="content">{children}</section>

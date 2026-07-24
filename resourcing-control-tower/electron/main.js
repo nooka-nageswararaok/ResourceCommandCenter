@@ -31,6 +31,7 @@ const TAG_WORKBOOK_PATH = "C:\\Users\\nooka.nageswararaok\\Downloads\\FTE GEO_De
 const STAGE_CLASSIFICATION_WORKBOOK_NAME = 'Stage_Classification.xlsx';
 const FULFILMENT_SOURCE_SHEET_NAME = 'SF Datadump';
 const FULFILMENT_CANDIDATE_SHEET_NAME = 'Candidate Tracker';
+const FULFILMENT_DEMAND_MASTER_SHEET_NAME = 'Demand Master';
 const FULFILMENT_DETAILS_SHEET_NAME = 'Fulfillment Details 2025&2026';
 const SETTINGS_FILE_NAME = 'settings.json';
 const COMMENTS_FILE_NAME = 'comments.json';
@@ -886,11 +887,12 @@ function getRowValue(rowObject, values, headerIndex, aliases, columnIndex) {
 function parseFulfilmentWorkbook(filePath) {
   const sheetName = FULFILMENT_SOURCE_SHEET_NAME;
   const candidateSheetName = FULFILMENT_CANDIDATE_SHEET_NAME;
+  const demandMasterSheetName = FULFILMENT_DEMAND_MASTER_SHEET_NAME;
   const fulfilmentDetailsSheetName = FULFILMENT_DETAILS_SHEET_NAME;
   const workbook = XLSX.readFile(filePath, {
     dense: true,
     cellDates: false,
-    sheets: [sheetName, candidateSheetName, fulfilmentDetailsSheetName],
+    sheets: [sheetName, candidateSheetName, demandMasterSheetName, fulfilmentDetailsSheetName],
     bookDeps: false,
     bookVBA: false,
     bookFiles: false
@@ -937,6 +939,7 @@ function parseFulfilmentWorkbook(filePath) {
         prioritywise: '',
         location: String(getRowValue(rowObject, values, headerIndex, ['Personnel Sub Area Name'], 30) || '').trim(),
         band: String(getRowValue(rowObject, values, headerIndex, ['Demand Sub Band Name'], 36) || '').trim(),
+        requestRequisitionType: String(getRowValue(rowObject, values, headerIndex, ['Request/Requisition Type', 'Request Requisition Type'], 33) || '').trim(),
         reqDate: String(getRowValue(rowObject, values, headerIndex, ['Date Created'], 14) || '').trim(),
         closedDate: String(getRowValue(rowObject, values, headerIndex, ['Closed_Date', 'Closed Date'], -1) || '').trim(),
         demandMonth: toMonthLabel(
@@ -960,12 +963,13 @@ function parseFulfilmentWorkbook(filePath) {
     });
 
   const candidateRows = parseCandidateTrackerSheet(workbook.Sheets[candidateSheetName]);
+  const demandMasterRows = parseDemandMasterSheet(workbook.Sheets[demandMasterSheetName]);
   const fulfilmentDetailRows = enrichFulfilmentDetails(
     parseFulfilmentDetailsSheet(workbook.Sheets[fulfilmentDetailsSheetName]),
     rows
   );
 
-  return { rows, sheetName, candidateRows, candidateSheetName, fulfilmentDetailRows, fulfilmentDetailsSheetName };
+  return { rows, sheetName, candidateRows, candidateSheetName, demandMasterRows, demandMasterSheetName, fulfilmentDetailRows, fulfilmentDetailsSheetName };
 }
 
 function enrichFulfilmentDetails(fulfilmentRows, demandRows) {
@@ -1136,6 +1140,46 @@ function parseFulfilmentDetailsSheet(worksheet) {
         comments: String(getRowValue(rowObject, values, headerIndex, ['Comments'], 11) || '').trim(),
         jobRequisitionId: String(getRowValue(rowObject, values, headerIndex, ['Job Requisition ID'], 11) || '').trim(),
         laptopCollectedLocation: String(getRowValue(rowObject, values, headerIndex, ['Laptop Collected Location'], 12) || '').trim()
+      };
+    });
+}
+
+function parseDemandMasterSheet(worksheet) {
+  if (!worksheet) return [];
+
+  const aoa = XLSX.utils.sheet_to_json(worksheet, {
+    header: 1,
+    defval: '',
+    raw: false,
+    blankrows: false
+  });
+  const headerRow = aoa.findIndex((row) => {
+    const headers = row.map(normalizeHeader);
+    return headers.some((header) => [
+      'legacyjobreqid',
+      'jobrequisitionid',
+      'demandid',
+      'sr',
+      'srno',
+      'srnumber'
+    ].includes(header));
+  });
+
+  if (headerRow < 0) return [];
+
+  const headers = aoa[headerRow].map((header) => String(header || '').trim());
+  const headerIndex = new Map(headers.map((header, index) => [normalizeHeader(header), index]));
+  return aoa
+    .slice(headerRow + 1)
+    .filter((values) => values.some((value) => String(value || '').trim()))
+    .map((values, index) => {
+      const rowObject = Object.fromEntries(headers.map((header, colIndex) => [header, values[colIndex] ?? '']));
+      return {
+        id: index + 1,
+        legacyJobReqId: String(getRowValue(rowObject, values, headerIndex, ['Legacy Job Req Id', 'Legacy Job Req ID', 'SR', 'SR#', 'SR No', 'SR Number'], -1) || '').trim(),
+        demandId: String(getRowValue(rowObject, values, headerIndex, ['Job Requisition ID', 'Demand ID', 'DemandId', 'Job Req ID', 'JobReqId'], -1) || '').trim(),
+        status: String(getRowValue(rowObject, values, headerIndex, ['Status', 'Demand Status'], -1) || '').trim(),
+        customer: String(getRowValue(rowObject, values, headerIndex, ['Customer Name (AIS)', 'Customer'], -1) || '').trim()
       };
     });
 }
@@ -1590,12 +1634,14 @@ async function getFulfilmentData() {
     return {
       activeDemandRows: [],
       candidateRows: [],
+      demandMasterRows: [],
       fulfilmentDetailRows: [],
       stageClassification,
       fileName: path.basename(FULFILMENT_WORKBOOK_PATH),
       filePath: workbookPath || '',
       sheetName: FULFILMENT_SOURCE_SHEET_NAME,
       candidateSheetName: FULFILMENT_CANDIDATE_SHEET_NAME,
+      demandMasterSheetName: FULFILMENT_DEMAND_MASTER_SHEET_NAME,
       fulfilmentDetailsSheetName: FULFILMENT_DETAILS_SHEET_NAME,
       refreshedAt: new Date().toISOString(),
       warning: `Fulfilment input workbook not found: ${workbookPath || FULFILMENT_WORKBOOK_PATH}`
@@ -1609,22 +1655,25 @@ async function getFulfilmentData() {
     return {
       activeDemandRows: [],
       candidateRows: [],
+      demandMasterRows: [],
       fulfilmentDetailRows: [],
       stageClassification,
       fileName: path.basename(workbookPath),
       filePath: workbookPath,
       sheetName: FULFILMENT_SOURCE_SHEET_NAME,
       candidateSheetName: FULFILMENT_CANDIDATE_SHEET_NAME,
+      demandMasterSheetName: FULFILMENT_DEMAND_MASTER_SHEET_NAME,
       fulfilmentDetailsSheetName: FULFILMENT_DETAILS_SHEET_NAME,
       refreshedAt: new Date().toISOString(),
       warning: error.message || getWorkbookReadErrorMessage(workbookPath, error)
     };
   }
 
-  const { rows, sheetName, candidateRows, candidateSheetName, fulfilmentDetailRows, fulfilmentDetailsSheetName } = parseFulfilmentWorkbook(preparedWorkbook.cachedPath);
+  const { rows, sheetName, candidateRows, candidateSheetName, demandMasterRows, demandMasterSheetName, fulfilmentDetailRows, fulfilmentDetailsSheetName } = parseFulfilmentWorkbook(preparedWorkbook.cachedPath);
   return {
     activeDemandRows: rows,
     candidateRows,
+    demandMasterRows,
     fulfilmentDetailRows,
     stageClassification,
     fileName: preparedWorkbook.fileName,
@@ -1632,6 +1681,7 @@ async function getFulfilmentData() {
     cachedFilePath: preparedWorkbook.cachedPath,
     sheetName,
     candidateSheetName,
+    demandMasterSheetName,
     fulfilmentDetailsSheetName,
     refreshedAt: new Date().toISOString()
   };

@@ -7,10 +7,12 @@ const headerAliases = {
   subBand: ['sub band', 'subband', 'sub grade'],
   location: ['location', 'work location', 'base location', 'personnel subarea', 'country', 'onoff classification', 'onoffnearshore classification', 'onsite/offshore'],
   manager: ['manager', 'reporting manager', 'people manager', 'supervisor'],
-  capability: ['hr l4', 'capability', 'practice', 'competency', 'department', 'project l1', 'skill cluster'],
+  capability: ['hr l4', 'capability', 'practice', 'competency', 'department', 'project l1'],
   skills: ['skills', 'skill', 'primary skill', 'employee skill name', 'skill group sps', 'primary skill structure sps', 'technology'],
+  skillCluster: ['skill cluster', 'skillcluster'],
   fresherClassification: ['fresherfcl lateral', 'fresher fcl lateral', 'fresher lateral', 'fresherflag'],
   projectName: ['project name', 'project', 'assignment name'],
+  projectL4: ['project l4', 'project l4 org unit'],
   projectCode: ['project code', 'project id', 'wbs', 'engagement code'],
   wbsCode: ['wbs code', 'wbs', 'wbs element'],
   customer: ['customer', 'client', 'account'],
@@ -148,6 +150,7 @@ export function normalizeCsvRows(rows = []) {
       location: readField(row, headerMap, 'location'),
       manager: readField(row, headerMap, 'manager'),
       capability: readField(row, headerMap, 'capability'),
+      skillCluster: readField(row, headerMap, 'skillCluster'),
       fresherClassification: readField(row, headerMap, 'fresherClassification'),
       skills: readField(row, headerMap, 'skills')
         .split(/[;,|]/)
@@ -160,6 +163,7 @@ export function normalizeCsvRows(rows = []) {
     const assignment = {
       empId,
       projectName: readField(row, headerMap, 'projectName'),
+      projectL4: readField(row, headerMap, 'projectL4'),
       projectCode: readField(row, headerMap, 'projectCode'),
       wbsCode,
       wbsCodeCategory,
@@ -185,8 +189,8 @@ export function normalizeCsvRows(rows = []) {
     };
   });
 
-  const resources = records.map(({ projectName, projectCode, wbsCode, wbsCodeCategory, customer, billingStatus, allocationPct, fte, assignmentStart, assignmentEnd, ...resource }) => resource);
-  const assignments = records.map(({ employeeName, band, subBand, location, manager, capability, skills, daysToEnd, endRiskFlag, agingDays, benchFlag, id, ...assignment }) => assignment);
+  const resources = records.map(({ projectName, projectL4, projectCode, wbsCode, wbsCodeCategory, customer, billingStatus, allocationPct, fte, assignmentStart, assignmentEnd, ...resource }) => resource);
+  const assignments = records.map(({ employeeName, band, subBand, location, manager, capability, skillCluster, skills, daysToEnd, endRiskFlag, agingDays, benchFlag, id, ...assignment }) => assignment);
 
   return { resources, assignments, records };
 }
@@ -212,13 +216,15 @@ export function applyResourceFilters(records, filters) {
 
     return (
       matchesSearch &&
-      (!filters.customer || record.customer === filters.customer) &&
-      (!filters.project || record.projectName === filters.project) &&
+      matchesSelectedOption(filters.customer, record.customer) &&
+      matchesSelectedOption(filters.project, record.projectName) &&
+      matchesSelectedOption(filters.projectL4, record.projectL4) &&
       matchesSelectedOption(filters.pmName, record.pmName) &&
-      (!filters.billingStatus || record.billingStatus === filters.billingStatus) &&
-      (!filters.wbsCodeCategory || record.wbsCodeCategory === filters.wbsCodeCategory) &&
-      (!filters.band || record.band === filters.band) &&
-      (!filters.location || record.location === filters.location) &&
+      matchesSelectedOption(filters.billingStatus, record.billingStatus) &&
+      matchesSelectedOption(filters.wbsCodeCategory, record.wbsCodeCategory) &&
+      matchesSelectedOption(filters.band, record.band) &&
+      matchesSelectedOption(filters.location, record.location) &&
+      matchesSelectedOption(filters.capability, record.capability) &&
       (!filters.fresherOnly || record.fresherFlag)
     );
   });
@@ -234,10 +240,12 @@ export function applyQuickFilters(records, filters) {
 
     return (
       matchesSearch &&
-      (!filters.customer || record.customer === filters.customer) &&
-      (!filters.project || record.projectName === filters.project) &&
+      matchesSelectedOption(filters.customer, record.customer) &&
+      matchesSelectedOption(filters.project, record.projectName) &&
+      matchesSelectedOption(filters.projectL4, record.projectL4) &&
       matchesSelectedOption(filters.pmName, record.pmName) &&
-      (!filters.location || record.location === filters.location)
+      matchesSelectedOption(filters.location, record.location) &&
+      matchesSelectedOption(filters.capability, record.capability)
     );
   });
 }

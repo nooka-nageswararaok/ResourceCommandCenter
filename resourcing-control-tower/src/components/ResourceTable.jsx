@@ -15,6 +15,7 @@ const baseColumns = [
   { field: 'allocationPct', headerName: 'Allocation %', type: 'number', minWidth: 120 },
   { field: 'band', headerName: 'Band', minWidth: 100 },
   { field: 'location', headerName: 'Location', minWidth: 130 },
+  { field: 'skillCluster', headerName: 'Skill Cluster', minWidth: 160 },
   {
     field: 'assignmentEnd',
     headerName: 'End Date',
@@ -62,6 +63,7 @@ export default function ResourceTable({ rows, height = 620, showPmoComments = fa
               <Typography><b>Employee ID:</b> {selected.empId}</Typography>
               <Typography><b>Manager:</b> {selected.manager || 'Unspecified'}</Typography>
               <Typography><b>Capability:</b> {selected.capability || 'Unspecified'}</Typography>
+              <Typography><b>Skill Cluster:</b> {selected.skillCluster || 'Unspecified'}</Typography>
               <Typography><b>Band:</b> {[selected.band, selected.subBand].filter(Boolean).join(' / ') || 'Unspecified'}</Typography>
               <Typography><b>Location:</b> {selected.location || 'Unspecified'}</Typography>
               <Typography><b>Customer:</b> {selected.customer}</Typography>

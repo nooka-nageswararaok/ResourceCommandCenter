@@ -1,6 +1,6 @@
 {
   "name": "resourcing-control-tower",
-  "version": "1.0.0",
+  "version": "1.0.4",
   "description": "Offline Windows desktop Resource Assignation System built with React and Electron.",
   "author": "Resource Command Center",
   "main": "electron/main.js",

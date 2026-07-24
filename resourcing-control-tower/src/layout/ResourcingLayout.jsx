@@ -22,39 +22,76 @@ export default function ResourcingLayout({
           <span title={meta.filePath || ''}>{meta.fileName || 'Waiting for Excel input file'}</span>
         </div>
         <div className="topbar-controls">
-          <input
-            className="global-search"
-            value={quickFilters.search}
-            onChange={(event) => onQuickFilterChange('search', event.target.value)}
-            placeholder="Employee Code / Name"
-          />
-          <select value={quickFilters.customer} onChange={(event) => onQuickFilterChange('customer', event.target.value)}>
-            <option value="">Customer</option>
-            {getUniqueOptions(records, 'customer').map((option) => <option key={option} value={option}>{option}</option>)}
-          </select>
-          <select value={quickFilters.project} onChange={(event) => onQuickFilterChange('project', event.target.value)}>
-            <option value="">Project</option>
-            {getUniqueOptions(quickProjectRecords, 'projectName').map((option) => <option key={option} value={option}>{option}</option>)}
-          </select>
-          <Autocomplete
-            multiple
-            size="small"
-            limitTags={1}
-            options={getUniqueOptions(records, 'pmName')}
-            value={quickFilters.pmName}
-            onChange={(_, value) => onQuickFilterChange('pmName', value)}
-            renderInput={(params) => <TextField {...params} placeholder="PM Name" />}
-          />
-          <select value={quickFilters.location} onChange={(event) => onQuickFilterChange('location', event.target.value)}>
-            <option value="">Location</option>
-            {getUniqueOptions(records, 'location').map((option) => <option key={option} value={option}>{option}</option>)}
-          </select>
-          <Button variant="outlined" startIcon={<FolderOpen />} onClick={onChooseExcelFile} disabled={loading}>
-            Choose Excel
-          </Button>
-          <Button variant="contained" startIcon={<Refresh />} onClick={onRefresh} disabled={loading}>
-            Refresh Excel
-          </Button>
+          <div className="topbar-filter-grid">
+            <input
+              className="global-search"
+              value={quickFilters.search}
+              onChange={(event) => onQuickFilterChange('search', event.target.value)}
+              placeholder="Employee Code / Name"
+            />
+            <Autocomplete
+              multiple
+              size="small"
+              limitTags={1}
+              options={getUniqueOptions(records, 'customer')}
+              value={quickFilters.customer}
+              onChange={(_, value) => onQuickFilterChange('customer', value)}
+              renderInput={(params) => <TextField {...params} placeholder="Customer" />}
+            />
+            <Autocomplete
+              multiple
+              size="small"
+              limitTags={1}
+              options={getUniqueOptions(quickProjectRecords, 'projectName')}
+              value={quickFilters.project}
+              onChange={(_, value) => onQuickFilterChange('project', value)}
+              renderInput={(params) => <TextField {...params} placeholder="Project" />}
+            />
+            <Autocomplete
+              multiple
+              size="small"
+              limitTags={1}
+              options={getUniqueOptions(records, 'projectL4')}
+              value={quickFilters.projectL4}
+              onChange={(_, value) => onQuickFilterChange('projectL4', value)}
+              renderInput={(params) => <TextField {...params} placeholder="Project L4" />}
+            />
+            <Autocomplete
+              multiple
+              size="small"
+              limitTags={1}
+              options={getUniqueOptions(records, 'pmName')}
+              value={quickFilters.pmName}
+              onChange={(_, value) => onQuickFilterChange('pmName', value)}
+              renderInput={(params) => <TextField {...params} placeholder="PM Name" />}
+            />
+            <Autocomplete
+              multiple
+              size="small"
+              limitTags={1}
+              options={getUniqueOptions(records, 'location')}
+              value={quickFilters.location}
+              onChange={(_, value) => onQuickFilterChange('location', value)}
+              renderInput={(params) => <TextField {...params} placeholder="Location" />}
+            />
+            <Autocomplete
+              multiple
+              size="small"
+              limitTags={1}
+              options={getUniqueOptions(records, 'capability')}
+              value={quickFilters.capability}
+              onChange={(_, value) => onQuickFilterChange('capability', value)}
+              renderInput={(params) => <TextField {...params} placeholder="HR L4" />}
+            />
+          </div>
+          <div className="topbar-actions">
+            <Button variant="outlined" startIcon={<FolderOpen />} onClick={onChooseExcelFile} disabled={loading}>
+              Choose Excel
+            </Button>
+            <Button variant="contained" startIcon={<Refresh />} onClick={onRefresh} disabled={loading}>
+              Refresh Excel
+            </Button>
+          </div>
         </div>
       </header>
       {children}

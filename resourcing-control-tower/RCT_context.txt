@@ -2392,6 +2392,43 @@ v2.9.33 - PP Project Expense Source Column Alignment
   - Production renderer build completed successfully:
     `npm.cmd run build`.
 
+v2.9.34 - Active Demand Referral Email Draft
+--------------------------------------------
+- Active Demands Dashboard now includes an `Email Demands` action in the
+  Active Demand Heatmap header.
+- The email drafts the complete currently filtered demand scope, including
+  rows beyond the heatmap's first-600-card render cap.
+- Email body addresses the team with the referral request text and includes
+  only these demand detail columns:
+  - Demand.
+  - Role / Skill Cluster.
+  - Band.
+  - Remaining.
+  - Location.
+  - Status.
+- Band is sourced from `Demand Sub Band Name` in `SF Datadump`.
+- The action uses Electron `email:draftHtml` and falls back to a plain-text
+  `mailto:` draft when the desktop email draft bridge is unavailable.
+- Production renderer build completed successfully after this update:
+  `npm.cmd run build`.
+
+v2.9.35 - PP Total Project Expense Source Reversion
+---------------------------------------------------
+- PP Report Analysis `Total Project Exp` KPI now maps from source column
+  `Total Project Expenses`.
+- `Project Expenses` is retained only as a fallback when older workbooks do not
+  contain `Total Project Expenses`.
+- Honeywell validation against
+  `ERS MEGA - GM Trend YTD Jun'26_MFG.xlsx`:
+  - All Honeywell rows: `Total Project Expenses` = 3,280.38, rounded to 3,280.
+  - Honeywell `Jun'26` + `DIGITAL ENGG1`: `Total Project Expenses` = 0.
+- Validation:
+  - Electron main syntax check completed successfully:
+    `node --check electron\main.js`.
+  - Production renderer build completed successfully:
+    `npm.cmd run build`.
+
+
 
 v2.9.36 - PP Bad Depts KPI
 --------------------------
@@ -2417,40 +2454,6 @@ v2.9.37 - Active Demand Onsite Offshore Badge
   `npm.cmd run build`.
 
 
-v2.9.34 - Active Demand Referral Email Draft
---------------------------------------------
-- Active Demands Dashboard now includes an `Email Demands` action in the
-  Active Demand Heatmap header.
-- The email drafts the complete currently filtered demand scope, including
-  rows beyond the heatmap's first-600-card render cap.
-- Email body addresses the team with the referral request text and includes
-  only these demand detail columns:
-  - Demand.
-  - Role / Skill Cluster.
-  - Remaining.
-  - Location.
-  - Status.
-- The action uses Electron `email:draftHtml` and falls back to a plain-text
-  `mailto:` draft when the desktop email draft bridge is unavailable.
-- Production renderer build completed successfully after this update:
-  `npm.cmd run build`.
-
-
-v2.9.35 - PP Total Project Expense Source Reversion
----------------------------------------------------
-- PP Report Analysis `Total Project Exp` KPI now maps from source column
-  `Total Project Expenses`.
-- `Project Expenses` is retained only as a fallback when older workbooks do not
-  contain `Total Project Expenses`.
-- Honeywell validation against
-  `ERS MEGA - GM Trend YTD Jun'26_MFG.xlsx`:
-  - All Honeywell rows: `Total Project Expenses` = 3,280.38, rounded to 3,280.
-  - Honeywell `Jun'26` + `DIGITAL ENGG1`: `Total Project Expenses` = 0.
-- Validation:
-  - Electron main syntax check completed successfully:
-    `node --check electron\main.js`.
-  - Production renderer build completed successfully:
-    `npm.cmd run build`.
 
 
 v2.9.38 - Candidate Stage Date Badge And Nav Collapse
@@ -2463,3 +2466,144 @@ v2.9.38 - Candidate Stage Date Badge And Nav Collapse
 - Validation:
   - Production renderer build completed successfully:
     `npm.cmd run build`.
+
+
+v2.9.39 - App Version Display
+-----------------------------
+- The main left navigation now shows the current app version from
+  `package.json`.
+- The expanded navigation shows `Version x.y.z`; collapsed navigation shows
+  the compact `vx.y.z` marker.
+
+
+
+v2.9.40 - Searchable Multi-Select Filters
+-----------------------------------------
+- Active Demands Dashboard filters now use searchable multi-select dropdowns
+  instead of native multi-select list boxes.
+- RAS top-bar filters for Customer, Project, PM Name, Location, and HR L4 now
+  use searchable multi-select dropdowns.
+- RAS Master filters now use searchable multi-select dropdowns for Customer,
+  Project, PM Name, Billing Status, WBS Code Type, Band, Location, and HR L4.
+- RAS filtering now applies HR L4 through the normalized `capability` field.
+- Validation:
+  - Production renderer build completed successfully:
+    `npm.cmd run build`.
+
+
+v2.9.41 - UI Version 1.0.1 Build
+--------------------------------
+- Updated the UI/package version from `1.0.0` to `1.0.1`.
+- The left navigation version display now shows `Version 1.0.1`.
+- Latest Windows installer build completed successfully after this update:
+  `npm.cmd run dist`.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.1-Setup.exe`.
+
+
+v2.9.42 - Customer Profile Performance Dashboard
+------------------------------------------------
+- Added Resource Fulfilment route:
+  - `/resource-fulfilment/customer-profile-performance`.
+- Added `Customer Profile Performance` dashboard for customer-wise post-TP1
+  profile movement across active demands.
+- Dashboard reads:
+  - Demand rows from `SF Datadump`.
+  - Candidate rows from `Candidate Tracker`.
+  - Demand/candidate join via demand `legacyJobReqId` and candidate `sr`.
+- Dashboard filters:
+  - Project L4.
+  - Customer.
+  - Demand Status.
+  - PM.
+  - Location.
+- Default filters:
+  - Project L4 = `ERS VDU-MEGA-MFG-DIGITAL ENGG1`.
+  - Demand Status = `Open`.
+- KPI strip includes:
+  - Demands.
+  - Total Positions.
+  - Open Positions.
+  - Submitted.
+  - Selected.
+  - Rejected.
+  - Pending Feedback.
+  - Dropped.
+  - No Show.
+  - Selection %.
+- `Submitted` is derived as:
+  - Rejected + Selected + Pending Feedback + Dropped + No Show.
+- Stage status buckets are based on Candidate Tracker `StageStatus` code:
+  - Rejected: `3.05`, `3.13`.
+  - Selected: `3.11`, `3.12`, `4.01`, `4.02`, `4.03`, `4.05`,
+    `4.07`, `4.08`, `4.09`, `5.1`, `5.2`, `5.3`, `5.4`, `5.5`,
+    `5.6`.
+  - Pending Feedback: `3.08`, `3.14`.
+  - Dropped: `3.07`.
+  - No Show: `3.06`.
+- Customer Demand Profile Performance table includes:
+  - S No.
+  - DemandId.
+  - Role + Skill Cluster.
+  - Total Positions.
+  - Open Positions.
+  - Submitted.
+  - Rejected.
+  - Selected.
+  - Pending Feedback.
+  - Dropped.
+  - No Show.
+  - Selection %.
+  - Profiles action.
+- Removed the `Feedback Pending %` column and KPI.
+- Added a Total row at the bottom of the Customer Demand Profile Performance
+  table.
+- `Profiles` action opens Candidate Details Dashboard for the selected demand.
+- KPI cards for submitted/selected/rejected/pending/dropped/no-show apply
+  demand-level drilldowns.
+- Project L4 is the first filter in the dashboard.
+- Updated the UI/package version from `1.0.1` to `1.0.2`.
+- Latest Windows installer build completed successfully:
+  `npm.cmd run dist`.
+- Latest installer artifact:
+  `release/Resource Assignation System (RAS)-1.0.2-Setup.exe`.
+
+
+v2.9.43 - Fulfilment Data Readiness Score
+-----------------------------------------
+- Active Demands Dashboard Data Quality Panel now presents a weighted Data
+  Readiness Score instead of only raw missing-value cards.
+- The score is based on:
+  - SF required field completeness for Hiring Manager, Customer, and Billing
+    Loss value where Billing Loss is Yes.
+  - Candidate Tracker stage date chain completeness.
+  - Closed_Date completeness for SF Datadump rows where Status is Closed.
+  - Candidate Tracker SR match rate against SF Datadump demand identifiers.
+  - Demand Master coverage for SF Datadump rows where Status is Open or On
+    Hold.
+- Removed the previous Missing Demand ID and Unmatched Candidates KPI cards.
+- The Demand Master coverage card shows the missing open/hold demand count
+  first, with coverage percentage in the caption.
+- Fulfilment workbook parsing now reads the existing `Demand Master` sheet and
+  returns normalized demand identifiers to the renderer.
+
+
+v2.9.44 - Active Demand Filtered Data Quality Build
+---------------------------------------------------
+- Active Demands Dashboard Data Quality Panel now recalculates from the
+  currently filtered demand scope.
+- Candidate Tracker readiness checks are scoped to candidate rows linked to
+  the filtered SF Datadump demands.
+- Updated the UI/package version from `1.0.2` to `1.0.3`.
+
+
+v2.9.45 - RAS Skill Cluster Internal Match Build
+------------------------------------------------
+- RAS resource parsing now reads `Skill Cluster` as a separate normalized
+  resource field from the resource input workbook.
+- Active Demands internal match suggestions now compare demand role and skill
+  cluster against RAS resource skills, HR L4 capability, and Skill Cluster.
+- Resource detail drilldowns now display Skill Cluster.
+- RAS Skill & Capability view now includes Skill Cluster filtering, summary,
+  and heatmap coverage.
+- Updated the UI/package version from `1.0.3` to `1.0.4`.

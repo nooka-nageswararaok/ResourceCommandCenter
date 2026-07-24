@@ -5,13 +5,14 @@ import { applyResourceFilters } from '../services/dataDerivation.js';
 
 const emptyFilters = {
   search: '',
-  customer: '',
-  project: '',
+  customer: [],
+  project: [],
   pmName: [],
-  billingStatus: '',
-  wbsCodeCategory: '',
-  band: '',
-  location: '',
+  billingStatus: [],
+  wbsCodeCategory: [],
+  band: [],
+  location: [],
+  capability: [],
   fresherOnly: false
 };
 

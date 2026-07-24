@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, CircularProgress, IconButton, Tooltip } from '@mui/material';
+import { Autocomplete, Button, CircularProgress, Dialog, DialogContent, DialogTitle, IconButton, TextField, Tooltip } from '@mui/material';
 import { Email, FolderOpen, OpenInNew, Refresh } from '@mui/icons-material';
 import KPIWidget from '../../components/KPIWidget.jsx';
+import ResourceTable from '../../components/ResourceTable.jsx';
 import { draftHtmlEmail, getFulfilmentData, selectFulfilmentExcelFile } from '../../services/fulfilmentService.js';
 
 const DEFAULT_PROJECT_L4 = 'ERS VDU-MEGA-MFG-DIGITAL ENGG1';
@@ -49,12 +50,14 @@ const stageMetricCodes = {
   renege: new Set(['5.7'])
 };
 
-export default function ActiveDemandsDashboard({ navigate }) {
+export default function ActiveDemandsDashboard({ navigate, resourceRecords = [] }) {
   const [rows, setRows] = useState([]);
   const [candidateRows, setCandidateRows] = useState([]);
+  const [demandMasterRows, setDemandMasterRows] = useState([]);
   const [meta, setMeta] = useState(initialMeta);
   const [filters, setFilters] = useState(defaultFilters);
   const [collapsedPanels, setCollapsedPanels] = useState({ dataQuality: false, billingLoss: false });
+  const [selectedMatchDemand, setSelectedMatchDemand] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -66,6 +69,7 @@ export default function ActiveDemandsDashboard({ navigate }) {
       if (!payload.canceled) {
         setRows(payload.activeDemandRows || []);
         setCandidateRows(payload.candidateRows || []);
+        setDemandMasterRows(payload.demandMasterRows || []);
         setMeta({
           fileName: payload.fileName || '',
           filePath: payload.filePath || '',
@@ -136,19 +140,37 @@ export default function ActiveDemandsDashboard({ navigate }) {
   const stageMetricCounts = useMemo(() => buildStageMetricCounts(candidateRows), [candidateRows]);
   const funnelRows = useMemo(() => buildDemandFunnelFromSfRows(filteredRows), [filteredRows]);
   const billingLossSummary = useMemo(() => buildBillingLossSummary(filteredRows), [filteredRows]);
-  const dataQualityRows = useMemo(() => buildDataQualityRows(rows, candidateRows), [candidateRows, rows]);
+  const filteredCandidateRows = useMemo(
+    () => (hasDemandFilters(filters) ? filterCandidateRowsByDemands(candidateRows, filteredRows) : candidateRows),
+    [candidateRows, filteredRows, filters]
+  );
+  const dataReadiness = useMemo(
+    () => buildDataReadiness(filteredRows, filteredCandidateRows, demandMasterRows),
+    [demandMasterRows, filteredCandidateRows, filteredRows]
+  );
+  const internalMatchMap = useMemo(
+    () => buildInternalMatchMap(filteredRows, resourceRecords),
+    [filteredRows, resourceRecords]
+  );
   const heatmapRows = useMemo(() => filteredRows.slice(0, MAX_HEATMAP_CARDS), [filteredRows]);
+  const selectedMatchRows = selectedMatchDemand
+    ? internalMatchMap.get(getDemandMatchKey(selectedMatchDemand)) || []
+    : [];
 
-  const updateMultiFilter = (field, event) => {
+  const updateMultiFilter = (field, value) => {
     setFilters((current) => ({
       ...current,
-      [field]: Array.from(event.target.selectedOptions).map((option) => option.value)
+      [field]: value
     }));
   };
 
   const openCandidateDetails = (legacyJobReqId) => {
     if (!legacyJobReqId || !navigate) return;
     navigate('resource-fulfilment/candidate-details', { legacyJobReqId });
+  };
+
+  const openInternalMatches = (demand) => {
+    setSelectedMatchDemand(demand);
   };
 
   const applyBillingLossDrilldown = (filterPatch) => {
@@ -266,21 +288,29 @@ export default function ActiveDemandsDashboard({ navigate }) {
             <div className="page-title-row compact-row collapsible-section-header">
               <div>
                 <h2>Data Quality Panel</h2>
-                <p>Readiness checks across SF Datadump and Candidate Tracker.</p>
+                <p>Weighted readiness checks across SF Datadump, Candidate Tracker, and Demand Master.</p>
               </div>
               <Button variant="outlined" size="small" onClick={() => togglePanel('dataQuality')}>
                 {collapsedPanels.dataQuality ? 'Expand' : 'Collapse'}
               </Button>
             </div>
             {!collapsedPanels.dataQuality ? (
-              <div className="fulfilment-block-heatmap data-quality-panel">
-                {dataQualityRows.map((item) => (
-                  <div className={`fulfilment-heat-block ${item.level}`} key={item.id} title={item.caption}>
-                    <strong>{item.count}</strong>
-                    <span>{item.label}</span>
-                    <small>{item.caption}</small>
-                  </div>
-                ))}
+              <div className="data-readiness-panel">
+                <div className={`data-readiness-score ${dataReadiness.level}`} title={dataReadiness.caption}>
+                  <span>Data Readiness Score</span>
+                  <strong>{dataReadiness.displayScore}</strong>
+                  <b>{dataReadiness.status}</b>
+                  <small>{dataReadiness.caption}</small>
+                </div>
+                <div className="fulfilment-block-heatmap data-quality-panel">
+                  {dataReadiness.checks.map((item) => (
+                    <div className={`fulfilment-heat-block ${item.level}`} key={item.id} title={item.caption}>
+                      <strong>{item.displayValue}</strong>
+                      <span>{item.label}</span>
+                      <small>{item.caption}</small>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : null}
           </section>
@@ -343,15 +373,15 @@ export default function ActiveDemandsDashboard({ navigate }) {
               <Button variant="outlined" size="small" onClick={() => setFilters(emptyFilters)}>Clear Filters</Button>
             </div>
             <div className="fulfilment-filter-bar active-demand-filter-bar">
-              <MultiSelect label="Project L4" value={filters.projectL4} options={options.projectL4} onChange={(event) => updateMultiFilter('projectL4', event)} />
-              <MultiSelect label="Status" value={filters.statuses} options={options.statuses} onChange={(event) => updateMultiFilter('statuses', event)} />
-              <MultiSelect label="Customer" value={filters.customers} options={options.customers} onChange={(event) => updateMultiFilter('customers', event)} />
-              <MultiSelect label="Month" value={filters.months} options={options.months} onChange={(event) => updateMultiFilter('months', event)} />
-              <MultiSelect label="Hiring Manager" value={filters.pms} options={options.pms} onChange={(event) => updateMultiFilter('pms', event)} />
-              <MultiSelect label="Offshore/Onsite" value={filters.offshoreOnsite} options={options.offshoreOnsite} onChange={(event) => updateMultiFilter('offshoreOnsite', event)} />
-              <MultiSelect label="Location" value={filters.locations} options={options.locations} onChange={(event) => updateMultiFilter('locations', event)} />
-              <MultiSelect label="Band" value={filters.bands} options={options.bands} onChange={(event) => updateMultiFilter('bands', event)} />
-              <MultiSelect label="CU Mapping" value={filters.cuMappings} options={options.cuMappings} onChange={(event) => updateMultiFilter('cuMappings', event)} />
+              <MultiSelect label="Project L4" value={filters.projectL4} options={options.projectL4} onChange={(value) => updateMultiFilter('projectL4', value)} />
+              <MultiSelect label="Status" value={filters.statuses} options={options.statuses} onChange={(value) => updateMultiFilter('statuses', value)} />
+              <MultiSelect label="Customer" value={filters.customers} options={options.customers} onChange={(value) => updateMultiFilter('customers', value)} />
+              <MultiSelect label="Month" value={filters.months} options={options.months} onChange={(value) => updateMultiFilter('months', value)} />
+              <MultiSelect label="Hiring Manager" value={filters.pms} options={options.pms} onChange={(value) => updateMultiFilter('pms', value)} />
+              <MultiSelect label="Offshore/Onsite" value={filters.offshoreOnsite} options={options.offshoreOnsite} onChange={(value) => updateMultiFilter('offshoreOnsite', value)} />
+              <MultiSelect label="Location" value={filters.locations} options={options.locations} onChange={(value) => updateMultiFilter('locations', value)} />
+              <MultiSelect label="Band" value={filters.bands} options={options.bands} onChange={(value) => updateMultiFilter('bands', value)} />
+              <MultiSelect label="CU Mapping" value={filters.cuMappings} options={options.cuMappings} onChange={(value) => updateMultiFilter('cuMappings', value)} />
             </div>
           </section>
 
@@ -377,10 +407,35 @@ export default function ActiveDemandsDashboard({ navigate }) {
             </div>
             <div className="active-demand-card-heatmap">
               {heatmapRows.map((row) => (
-                <DemandCard key={row.id} row={row} stageCounts={stageMetricCounts.get(String(row.legacyJobReqId || '').trim())} onOpenCandidates={openCandidateDetails} />
+                <DemandCard
+                  key={row.id}
+                  row={row}
+                  stageCounts={stageMetricCounts.get(String(row.legacyJobReqId || '').trim())}
+                  internalMatchCount={(internalMatchMap.get(getDemandMatchKey(row)) || []).length}
+                  onOpenCandidates={openCandidateDetails}
+                  onOpenInternalMatches={openInternalMatches}
+                />
               ))}
             </div>
           </section>
+
+          <Dialog open={Boolean(selectedMatchDemand)} onClose={() => setSelectedMatchDemand(null)} maxWidth="xl" fullWidth>
+            <DialogTitle>
+              Potential Internal Matches - {selectedMatchDemand ? formatDemandTitle(selectedMatchDemand) : ''}
+            </DialogTitle>
+            <DialogContent>
+              <p className="internal-match-dialog-caption">
+                {selectedMatchDemand ? formatRoleSkillCluster(selectedMatchDemand) : ''}
+              </p>
+              {selectedMatchRows.length ? (
+                <ResourceTable rows={selectedMatchRows} height={520} />
+              ) : (
+                <div className="state-panel internal-match-empty">
+                  No matching internal bench/Y-Code resources found.
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
         </>
       )}
     </main>
@@ -391,9 +446,15 @@ function MultiSelect({ label, value, options, onChange }) {
   return (
     <label>
       {label}
-      <select className="multi-select" multiple value={value} onChange={onChange}>
-        {options.map((option) => <option key={option} value={option}>{option}</option>)}
-      </select>
+      <Autocomplete
+        multiple
+        size="small"
+        limitTags={1}
+        options={options}
+        value={value}
+        onChange={(_, nextValue) => onChange(nextValue)}
+        renderInput={(params) => <TextField {...params} placeholder={`All ${label}`} />}
+      />
     </label>
   );
 }
@@ -476,46 +537,196 @@ function buildBillingLossSummary(rows) {
   ];
 }
 
-function buildDataQualityRows(demandRows, candidateRows) {
-  const demandIds = new Set(demandRows.map((row) => row.legacyJobReqId).filter(Boolean));
-  const orphanCandidates = candidateRows.filter((row) => row.sr && !demandIds.has(row.sr)).length;
-  return [
-    {
-      id: 'missing-pm',
-      label: 'Missing PM',
-      count: demandRows.filter((row) => !String(row.pm || '').trim()).length,
-      caption: 'SF Datadump rows without PM',
-      level: demandRows.some((row) => !String(row.pm || '').trim()) ? 'medium' : 'low'
-    },
-    {
-      id: 'missing-customer',
-      label: 'Missing Customer',
-      count: demandRows.filter((row) => !String(row.customer || '').trim()).length,
-      caption: 'SF Datadump rows without customer',
-      level: demandRows.some((row) => !String(row.customer || '').trim()) ? 'medium' : 'low'
-    },
-    {
-      id: 'missing-demand-id',
-      label: 'Missing Demand ID',
-      count: demandRows.filter((row) => !String(row.legacyJobReqId || '').trim()).length,
-      caption: 'SF Datadump rows without Legacy Job Req Id',
-      level: demandRows.some((row) => !String(row.legacyJobReqId || '').trim()) ? 'high' : 'low'
-    },
-    {
-      id: 'missing-billing-value',
-      label: 'Missing Billing Loss $',
-      count: demandRows.filter((row) => isBillingLoss(row.billingLoss) && !String(row.billingLossValue ?? '').trim()).length,
-      caption: 'Billing Loss rows without Column Q value',
-      level: demandRows.some((row) => isBillingLoss(row.billingLoss) && !String(row.billingLossValue ?? '').trim()) ? 'high' : 'low'
-    },
-    {
-      id: 'unmatched-candidates',
-      label: 'Unmatched Candidates',
-      count: orphanCandidates,
-      caption: 'Candidate Tracker SR not found in SF Datadump',
-      level: orphanCandidates ? 'medium' : 'low'
-    }
-  ];
+function buildDataReadiness(demandRows = [], candidateRows = [], demandMasterRows = []) {
+  const sfRequired = buildSfRequiredFieldsCheck(demandRows);
+  const stageDateChain = buildStageDateChainCheck(candidateRows);
+  const closedDate = buildClosedDateCheck(demandRows);
+  const srMatch = buildSrMatchCheck(demandRows, candidateRows);
+  const demandMaster = buildDemandMasterCoverageCheck(demandRows, demandMasterRows);
+  const checks = [sfRequired, stageDateChain, closedDate, srMatch, demandMaster];
+  const scoredChecks = checks.filter((check) => check.score !== null);
+  const totalWeight = scoredChecks.reduce((sum, check) => sum + check.weight, 0);
+  const score = totalWeight
+    ? Math.round(scoredChecks.reduce((sum, check) => sum + (check.score * check.weight), 0) / totalWeight)
+    : null;
+
+  return {
+    displayScore: score === null ? 'N/A' : `${score}%`,
+    status: getReadinessStatus(score),
+    level: getReadinessLevel(score),
+    caption: scoredChecks.length
+      ? 'Weighted score across source-field, stage-date, closure, SR-match, and Demand Master checks.'
+      : 'No readiness inputs available.',
+    checks
+  };
+}
+
+function hasDemandFilters(filters) {
+  return Boolean(
+    filters.customers.length ||
+    filters.statuses.length ||
+    filters.months.length ||
+    filters.pms.length ||
+    filters.offshoreOnsite.length ||
+    filters.locations.length ||
+    filters.bands.length ||
+    filters.projectL4.length ||
+    filters.cuMappings.length ||
+    filters.billingTypes.length ||
+    filters.billingLossAging.length ||
+    filters.billingLossProfileStates.length
+  );
+}
+
+function filterCandidateRowsByDemands(candidateRows = [], demandRows = []) {
+  const demandIds = buildDemandIdSet(demandRows);
+  if (!demandIds.size) return [];
+  return candidateRows.filter((row) => demandIds.has(normalizeDemandKey(row.sr)));
+}
+
+function buildSfRequiredFieldsCheck(demandRows) {
+  const issues = demandRows.reduce((sum, row) => {
+    let rowIssues = 0;
+    if (!String(row.pm || '').trim()) rowIssues += 1;
+    if (!String(row.customer || '').trim()) rowIssues += 1;
+    if (isBillingLoss(row.billingLoss) && !String(row.billingLossValue ?? '').trim()) rowIssues += 1;
+    return sum + rowIssues;
+  }, 0);
+  const totalChecks = demandRows.reduce((sum, row) => sum + (isBillingLoss(row.billingLoss) ? 3 : 2), 0);
+  const score = totalChecks ? pct(totalChecks - issues, totalChecks) : null;
+  return {
+    id: 'sf-required-fields',
+    label: 'SF Required Fields',
+    displayValue: score === null ? 'N/A' : `${score}%`,
+    caption: score === null ? 'No SF Datadump rows' : `${issues} issues / ${demandRows.length} rows`,
+    score,
+    weight: 25,
+    level: getReadinessLevel(score)
+  };
+}
+
+function buildStageDateChainCheck(candidateRows) {
+  const scopedRows = candidateRows.filter((row) => String(row.stageStatus || '').trim());
+  const incomplete = scopedRows.filter((row) => !hasCompleteStageDateChain(row)).length;
+  const score = scopedRows.length ? pct(scopedRows.length - incomplete, scopedRows.length) : null;
+  return {
+    id: 'stage-date-chain',
+    label: 'Stage Date Chain',
+    displayValue: score === null ? 'N/A' : `${score}%`,
+    caption: score === null ? 'No Candidate Tracker stage rows' : `${incomplete} issues / ${scopedRows.length} candidates`,
+    score,
+    weight: 25,
+    level: getReadinessLevel(score)
+  };
+}
+
+function buildClosedDateCheck(demandRows) {
+  const closedRows = demandRows.filter((row) => isClosedDemand(row.status));
+  const missing = closedRows.filter((row) => !String(row.closedDate || '').trim()).length;
+  const score = closedRows.length ? pct(closedRows.length - missing, closedRows.length) : null;
+  return {
+    id: 'closed-date',
+    label: 'Closed Date',
+    displayValue: score === null ? 'N/A' : `${score}%`,
+    caption: score === null ? 'No closed SF demands' : `${missing} missing / ${closedRows.length} closed demands`,
+    score,
+    weight: 20,
+    level: getReadinessLevel(score)
+  };
+}
+
+function buildSrMatchCheck(demandRows, candidateRows) {
+  const demandIds = buildDemandIdSet(demandRows);
+  const candidateRowsWithSr = candidateRows.filter((row) => String(row.sr || '').trim());
+  const mismatches = candidateRowsWithSr.filter((row) => !demandIds.has(normalizeDemandKey(row.sr))).length;
+  const score = candidateRowsWithSr.length ? pct(candidateRowsWithSr.length - mismatches, candidateRowsWithSr.length) : null;
+  return {
+    id: 'sr-match-rate',
+    label: 'SR Match Rate',
+    displayValue: score === null ? 'N/A' : `${score}%`,
+    caption: score === null ? 'No Candidate Tracker SR values' : `${mismatches} mismatches / ${candidateRowsWithSr.length} candidate SRs`,
+    score,
+    weight: 20,
+    level: getReadinessLevel(score)
+  };
+}
+
+function buildDemandMasterCoverageCheck(demandRows, demandMasterRows) {
+  if (!demandMasterRows.length) {
+    return {
+      id: 'demand-master-coverage',
+      label: 'Demand Master Coverage',
+      displayValue: 'N/A',
+      caption: 'Demand Master sheet not found or empty',
+      score: null,
+      weight: 10,
+      level: 'medium'
+    };
+  }
+
+  const masterIds = buildDemandIdSet(demandMasterRows);
+  const openHoldRows = demandRows.filter((row) => isOpenOrHoldDemand(row.status));
+  const missing = openHoldRows.filter((row) => !rowMatchesDemandIdSet(row, masterIds)).length;
+  const score = openHoldRows.length ? pct(openHoldRows.length - missing, openHoldRows.length) : null;
+  return {
+    id: 'demand-master-coverage',
+    label: 'Demand Master Coverage',
+    displayValue: score === null ? 'N/A' : missing,
+    caption: score === null ? 'No open/hold SF demands' : `${score}% covered; open/hold SF demands not in Demand Master`,
+    score,
+    weight: 10,
+    level: getReadinessLevel(score)
+  };
+}
+
+function hasCompleteStageDateChain(row) {
+  const stageCode = getStageStatusCode(row.stageStatus);
+  const requiredFields = getRequiredStageDateFields(stageCode);
+  return requiredFields.every((field) => String(row[field] || '').trim());
+}
+
+function getRequiredStageDateFields(stageCode) {
+  if (!stageCode) return ['profileReceivedDate'];
+  const stageNumber = Number(stageCode);
+  if (!Number.isFinite(stageNumber)) return ['profileReceivedDate'];
+  if (stageNumber >= 5) return ['profileReceivedDate', 'screenDate', 'tp1Date', 'tp2Date', 'offerDate'];
+  if (stageNumber >= 4) return ['profileReceivedDate', 'screenDate', 'tp1Date', 'tp2Date', 'customerFeedbackDate'];
+  if (stageNumber >= 3) return ['profileReceivedDate', 'screenDate', 'tp1Date', 'tp2Date'];
+  if (stageNumber >= 2) return ['profileReceivedDate', 'screenDate', 'tp1Date'];
+  return ['profileReceivedDate'];
+}
+
+function buildDemandIdSet(rows) {
+  const ids = new Set();
+  rows.forEach((row) => {
+    [row.legacyJobReqId, row.demandId].forEach((value) => {
+      const key = normalizeDemandKey(value);
+      if (key) ids.add(key);
+    });
+  });
+  return ids;
+}
+
+function rowMatchesDemandIdSet(row, idSet) {
+  return idSet.has(normalizeDemandKey(row.legacyJobReqId)) || idSet.has(normalizeDemandKey(row.demandId));
+}
+
+function normalizeDemandKey(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function getReadinessStatus(score) {
+  if (score === null) return 'Not Available';
+  if (score >= 95) return 'Ready';
+  if (score >= 80) return 'Watch';
+  return 'Action Needed';
+}
+
+function getReadinessLevel(score) {
+  if (score === null) return 'medium';
+  if (score >= 95) return 'low';
+  if (score >= 80) return 'medium';
+  return 'high';
 }
 
 function buildSfDemandSummary(rows = []) {
@@ -569,6 +780,77 @@ function buildStageMetricCounts(candidateRows) {
   });
 
   return countMap;
+}
+
+function buildInternalMatchMap(demandRows = [], resourceRows = []) {
+  const internalPool = resourceRows.filter((resource) => resource.benchFlag);
+  const matchMap = new Map();
+
+  demandRows.forEach((demand) => {
+    const matches = internalPool.filter((resource) => resourceMatchesDemand(demand, resource));
+    matchMap.set(getDemandMatchKey(demand), matches);
+  });
+
+  return matchMap;
+}
+
+function resourceMatchesDemand(demand, resource) {
+  if (!matchesLocation(demand.location, resource.location)) return false;
+  if (!matchesBand(demand.band, resource)) return false;
+
+  const demandTokens = tokenizeMatchText(`${demand.role || ''} ${demand.skillCluster || ''}`);
+  if (!demandTokens.size) return false;
+
+  const resourceTokens = tokenizeMatchText([
+    ...(Array.isArray(resource.skills) ? resource.skills : []),
+    resource.capability,
+    resource.skillCluster
+  ].join(' '));
+
+  return [...demandTokens].some((token) => resourceTokens.has(token));
+}
+
+function matchesLocation(demandLocation, resourceLocation) {
+  const demandValue = normalizeMatchText(demandLocation);
+  const resourceValue = normalizeMatchText(resourceLocation);
+  return Boolean(demandValue && resourceValue && demandValue === resourceValue);
+}
+
+function matchesBand(demandBand, resource) {
+  const demandValue = normalizeBandValue(demandBand);
+  if (!demandValue) return false;
+
+  const resourceBand = normalizeBandValue(resource.band);
+  const resourceSubBand = normalizeBandValue(resource.subBand);
+  if (demandValue.includes('.')) return demandValue === resourceSubBand;
+  return demandValue === resourceBand || resourceSubBand.startsWith(`${demandValue}.`);
+}
+
+function getDemandMatchKey(row) {
+  return normalizeDemandKey(row?.legacyJobReqId) || normalizeDemandKey(row?.demandId) || String(row?.id || '');
+}
+
+function normalizeMatchText(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function normalizeBandValue(value) {
+  return String(value || '').toLowerCase().replace(/\s+/g, '').trim();
+}
+
+function tokenizeMatchText(value) {
+  const stopWords = new Set([
+    'and', 'the', 'for', 'with', 'ltd', 'hcl', 'senior', 'lead', 'engineer',
+    'developer', 'specialist', 'consultant', 'associate', 'technical', 'resource',
+    'role', 'l1', 'l2', 'l3', 'l4'
+  ]);
+
+  return new Set(
+    normalizeMatchText(value)
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3 && !stopWords.has(token))
+  );
 }
 
 function getBillingLossSummaryRows(rows, item) {
@@ -638,10 +920,11 @@ function buildBillingLossEmailDraft({ item, rows, stageMetricCounts, meta }) {
 }
 
 function buildActiveDemandEmailDraft(rows) {
-  const headers = ['Demand', 'Role / Skill Cluster', 'Remaining', 'Location', 'Status'];
+  const headers = ['Demand', 'Role / Skill Cluster', 'Band', 'Remaining', 'Location', 'Status'];
   const rowValues = rows.map((row) => [
     formatDemandTitle(row),
     formatRoleSkillCluster(row),
+    row.band,
     row.remainingPositions,
     row.location,
     isOnHoldDemand(row.status) ? 'ON HOLD' : row.status
@@ -785,7 +1068,7 @@ function topGroup(rows, field) {
 }
 
 function getBillingType(row) {
-  return isBillingLoss(row.billingLoss) ? 'Billing Loss' : 'Pro Active';
+  return isBillingLoss(row.billingLoss) ? 'Billing Loss' : String(row.requestRequisitionType || '').trim() || 'Pro Active';
 }
 
 function matchesBillingLossAging(row, bucket) {
@@ -808,10 +1091,10 @@ function hasBillingLossDrilldown(filters) {
   );
 }
 
-function DemandCard({ row, stageCounts = {}, onOpenCandidates }) {
+function DemandCard({ row, stageCounts = {}, internalMatchCount = 0, onOpenCandidates, onOpenInternalMatches }) {
   const riskClass = Number(row.agingDays || 0) > 60 ? 'high' : Number(row.remainingPositions || 0) > 0 ? 'medium' : 'low';
   const billingLossDemand = isBillingLoss(row.billingLoss);
-  const demandType = billingLossDemand ? 'Billing Loss' : 'Pro Active';
+  const demandType = getBillingType(row);
   const demandTitle = formatDemandTitle(row);
   const roleSkillCluster = formatRoleSkillCluster(row);
 
@@ -836,6 +1119,15 @@ function DemandCard({ row, stageCounts = {}, onOpenCandidates }) {
         <span className="active-demand-offshore-onsite" title={row.offshoreOnsite || ''}>
           {row.offshoreOnsite || 'Onsite/Offshore not available'}
         </span>
+        <button
+          className="active-demand-match-badge"
+          type="button"
+          onClick={() => onOpenInternalMatches(row)}
+          disabled={!internalMatchCount}
+          title={internalMatchCount ? 'View matching bench/Y-Code resources' : 'No matching bench/Y-Code resources'}
+        >
+          <b>{internalMatchCount}</b> Potential Matches
+        </button>
       </div>
       <span className="active-demand-role">{roleSkillCluster}</span>
       <div className="active-demand-card-grid">
@@ -877,6 +1169,15 @@ function isBillingLoss(value) {
 
 function isOnHoldDemand(value) {
   return String(value || '').trim().toLowerCase() === 'on hold';
+}
+
+function isOpenOrHoldDemand(value) {
+  const status = String(value || '').trim().toLowerCase();
+  return status === 'open' || status === 'on hold';
+}
+
+function isClosedDemand(value) {
+  return String(value || '').trim().toLowerCase() === 'closed';
 }
 
 function formatDollarValue(value) {

@@ -15,9 +15,6 @@ Editable remarks on Active Demand heatmap cards
 Editable action owner + due date per demand
 Remarks visible in snapshot exports and email drafts
 
-3. Demand-to-Resource Internal Match Suggestions
-Cross-reference Active Demands (role, band, location) against the RAS Bench/Y-Code view. Surface a "potential internal matches" count on each demand card, with drilldown to the matching bench resources — closing the loop between the two modules.
-
 Phase 2 — Leadership Intelligence (Mid-term)
 4. PM / Hiring Manager Accountability Board (Fulfilment)
 Parallel to the RAS PM Accountability view, build a PM-wise fulfilment scorecard:
@@ -56,15 +53,6 @@ Exportable as an additional sheet in the weekly snapshot
 
 
 Structural / Quality Enhancements (Ongoing)
-11. Data Quality Scoring
-Extend the existing Data Quality Panel beyond missing PM/customer/billing fields to include:
-
-% of candidates with complete stage date chain
-% of demands with Closed_Date populated when Status = Closed
-Candidate Tracker SR mismatch rate vs. SF Datadump
-Present as a data readiness score, not just a list of missing values.
 
 12. Comment Export/Import Round-trip
 Add clear/export/import controls for comments.json (already listed as a known gap). Allows a team lead to export remarks, share via email, and import on another machine — meaningful given the offline, no-backend architecture.
-13. App Version Display
-Show the current app version (from package.json) somewhere in the UI footer or About dialog. Useful when distributing installer updates across the team.

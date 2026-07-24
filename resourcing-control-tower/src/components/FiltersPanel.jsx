@@ -4,10 +4,12 @@ import { Autocomplete, TextField } from '@mui/material';
 const filterFields = [
   ['customer', 'Customer'],
   ['project', 'Project'],
+  ['projectL4', 'Project L4'],
   ['billingStatus', 'Billing Status'],
   ['wbsCodeCategory', 'WBS Code Type'],
   ['band', 'Band'],
-  ['location', 'Location']
+  ['location', 'Location'],
+  ['capability', 'HR L4']
 ];
 
 const fieldLookup = {
@@ -18,14 +20,14 @@ export default function FiltersPanel({ records, filters, onChange, onReset }) {
   const update = (field, value) => {
     const nextFilters = { ...filters, [field]: value };
     if (field === 'customer') {
-      nextFilters.project = '';
+      nextFilters.project = [];
     }
     onChange(nextFilters);
   };
 
   const optionRecords = (field) => {
-    if (field === 'project' && filters.customer) {
-      return records.filter((record) => record.customer === filters.customer);
+    if (field === 'project' && normalizeMultiValue(filters.customer).length) {
+      return records.filter((record) => normalizeMultiValue(filters.customer).includes(record.customer));
     }
     return records;
   };
@@ -51,14 +53,15 @@ export default function FiltersPanel({ records, filters, onChange, onReset }) {
       {filterFields.map(([field, label]) => (
         <label key={field}>
           {label}
-          <select value={filters[field]} onChange={(event) => update(field, event.target.value)}>
-            <option value="">All</option>
-            {getUniqueOptions(optionRecords(field), fieldLookup[field] || field).map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
+          <Autocomplete
+            multiple
+            size="small"
+            limitTags={1}
+            options={getUniqueOptions(optionRecords(field), fieldLookup[field] || field)}
+            value={normalizeMultiValue(filters[field])}
+            onChange={(_, value) => update(field, value)}
+            renderInput={(params) => <TextField {...params} placeholder={`All ${label}`} />}
+          />
         </label>
       ))}
 
@@ -75,4 +78,9 @@ export default function FiltersPanel({ records, filters, onChange, onReset }) {
       </label>
     </aside>
   );
+}
+
+function normalizeMultiValue(value) {
+  if (Array.isArray(value)) return value;
+  return value ? [value] : [];
 }

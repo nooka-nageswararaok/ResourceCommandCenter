@@ -1,6 +1,6 @@
 export default function SkillHeatMap({ records }) {
   const skillCounts = records.reduce((acc, record) => {
-    record.skills.forEach((skill) => {
+    getResourceSkillProfile(record).forEach((skill) => {
       acc[skill] = (acc[skill] || 0) + 1;
     });
     return acc;
@@ -14,7 +14,7 @@ export default function SkillHeatMap({ records }) {
 
   return (
     <div className="chart-card">
-      <h2>Skill Heat Map - Employee Skill Name</h2>
+      <h2>Skill Heat Map - Skills, Capability & Skill Cluster</h2>
       <div className="skill-heat-map">
         {data.length ? data.map((item) => {
           const intensity = item.value / max;
@@ -36,4 +36,14 @@ export default function SkillHeatMap({ records }) {
       </div>
     </div>
   );
+}
+
+function getResourceSkillProfile(record) {
+  return [
+    ...(Array.isArray(record.skills) ? record.skills : []),
+    record.capability,
+    record.skillCluster
+  ]
+    .map((skill) => String(skill || '').trim())
+    .filter(Boolean);
 }
